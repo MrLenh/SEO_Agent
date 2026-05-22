@@ -49,6 +49,7 @@ class GenerateArticleRequest(BaseModel):
     word_count: int = 1500
     platform: Platform = Platform.SHOPIFY
     blog_channel_id: Optional[int] = None
+    shop_domain: Optional[str] = None
     auto_publish: bool = False
 
 

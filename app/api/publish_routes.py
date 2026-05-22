@@ -45,7 +45,7 @@ async def publish_to_shopify(
     """Publish a draft to Shopify without generating an image."""
     post = _get_post_or_404(post_id, db)
 
-    publisher = ShopifyPublisher(db=db)
+    publisher = ShopifyPublisher(shop_domain=body.shop_domain, db=db)
     try:
         article = await publisher.publish_article(
             post=post,
@@ -136,7 +136,7 @@ async def full_publish(
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"DALL-E error: {e}")
 
-    publisher = ShopifyPublisher(db=db)
+    publisher = ShopifyPublisher(shop_domain=body.shop_domain, db=db)
     try:
         article = await publisher.publish_article(
             post=post,
