@@ -1872,19 +1872,25 @@ async function renderKnowledge() {
 
         <!-- Crawl & Import -->
         <div class="card">
-          <div class="text-sm font-semibold text-gray-700 mb-3">🌐 Crawl & Import Blog Content</div>
-          <p class="text-xs text-gray-400 mb-3">Enter a blog post URL to crawl it into the knowledge base, or check "crawl index" to follow all article links on a listing page.</p>
-          <div class="space-y-2">
-            <input id="kb-url" class="input" placeholder="https://yourbrand.com/blogs/news/article-slug">
-            <label class="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" id="kb-index" class="rounded"> Crawl blog index (follow all article links)
-            </label>
-            <button class="btn btn-primary btn-sm w-full" style="justify-content:center" id="kb-crawl-btn" onclick="kbCrawl()">
-              🌐 Start Crawl
-            </button>
-          </div>
+          <div class="text-sm font-semibold text-gray-700 mb-3">🌐 Import from Active Stores</div>
+          <p class="text-xs text-gray-400 mb-3">Fetch all published blog articles from each store via the Shopify API — no URL needed. Own-store content is auto-approved.</p>
+          <div id="kb-store-list" class="space-y-2 mb-3">${skeletons(1)}</div>
+
+          <!-- Manual URL fallback -->
+          <details class="mt-2">
+            <summary class="text-xs text-gray-400 cursor-pointer select-none hover:text-gray-600">+ Crawl an external URL manually</summary>
+            <div class="space-y-2 mt-2">
+              <input id="kb-url" class="input" placeholder="https://example.com/blog/article-slug">
+              <label class="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" id="kb-index" class="rounded"> Crawl blog index (follow all article links)
+              </label>
+              <button class="btn btn-secondary btn-sm w-full" style="justify-content:center" id="kb-crawl-btn" onclick="kbCrawl()">
+                🌐 Crawl URL
+              </button>
+            </div>
+          </details>
+
           <div id="kb-crawl-status" class="text-xs text-gray-400 mt-2"></div>
-          <!-- Recent jobs -->
           <div id="kb-jobs" class="mt-3 space-y-1 text-xs"></div>
         </div>
 
@@ -1940,6 +1946,7 @@ async function renderKnowledge() {
   kbLoadStats()
   kbLoadItems()
   kbLoadJobs()
+  kbLoadStores()
 }
 
 // ── KB Stats ──────────────────────────────────────────────────
@@ -2066,6 +2073,62 @@ async function kbApproveAll() {
     kbLoadItems(1)
     kbLoadStats()
   } catch(e) { toast(e.message, 'error') }
+}
+
+// ── Store list ─────────────────────────────────────────────────
+async function kbLoadStores() {
+  const el = document.getElementById('kb-store-list')
+  if (!el) return
+
+  const stores = S.myStores || []
+  if (!stores.length) {
+    el.innerHTML = `<div class="text-xs text-gray-400">No active stores found. Connect a Shopify store first.</div>`
+    return
+  }
+
+  // Build store rows — each shows last crawl job status if any
+  const shop = S.currentShop || ''
+  let jobs = []
+  try {
+    const sp = shop ? `?shop_domain=${encodeURIComponent(shop)}` : ''
+    const allJobs = await GET(`/api/v1/knowledge/jobs${sp}`)
+    jobs = allJobs.filter(j => j.job_type === 'shopify_store')
+  } catch(_) {}
+
+  el.innerHTML = stores.map(s => {
+    const lastJob = jobs.find(j => j.shop_domain === s.shop_domain)
+    const jobBadge = lastJob
+      ? ({ queued: '🕐 Queued', running: '⏳ Crawling…', done: `✅ ${lastJob.items_found} articles`, failed: '❌ Failed' }[lastJob.status] || lastJob.status)
+      : ''
+    return `<div class="flex items-center gap-2 p-2 border border-gray-100 rounded-lg">
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium text-gray-700 truncate">${esc(s.shop_domain)}</div>
+        ${jobBadge ? `<div class="text-xs text-gray-400 mt-0.5">${jobBadge}${lastJob?.error ? ` · <span class="text-red-400" title="${esc(lastJob.error)}">⚠ error</span>` : ''}</div>` : ''}
+      </div>
+      <button class="btn btn-primary btn-sm shrink-0" id="kb-store-btn-${esc(s.shop_domain)}"
+        onclick="kbCrawlStore('${esc(s.shop_domain)}')">
+        🌐 Import Blog
+      </button>
+    </div>`
+  }).join('')
+}
+
+async function kbCrawlStore(shopDomain) {
+  const btn = document.getElementById(`kb-store-btn-${shopDomain}`)
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Starting…' }
+  const status = document.getElementById('kb-crawl-status')
+  try {
+    const r = await POST('/api/v1/knowledge/crawl-store', { shop_domain: shopDomain })
+    if (status) status.textContent = `✅ Job #${r.job_id} started for ${shopDomain} — articles will appear in KB shortly.`
+    // Poll for completion: refresh job list + stats after a few seconds
+    setTimeout(() => { kbLoadJobs(); kbLoadStores() }, 4000)
+    setTimeout(() => { kbLoadJobs(); kbLoadItems(); kbLoadStats(); kbLoadStores() }, 15000)
+  } catch(e) {
+    if (status) status.textContent = `Error: ${e.message}`
+    toast(e.message, 'error')
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '🌐 Import Blog' }
+  }
 }
 
 // ── Crawl ──────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import json
+import httpx
 from datetime import datetime
 from typing import Optional
 
@@ -53,6 +54,10 @@ class AnalyzeRankingsRequest(BaseModel):
     shop_domain: Optional[str] = None
 
 
+class CrawlStoreRequest(BaseModel):
+    shop_domain: str
+
+
 # ── Crawl ─────────────────────────────────────────────────────────────────────
 
 @knowledge_router.post("/crawl")
@@ -96,6 +101,118 @@ def _run_crawl(
                 count += 1
             except Exception:
                 pass
+
+        job.status = CrawlStatus.DONE
+        job.items_found = count
+        job.completed_at = datetime.utcnow()
+        db.commit()
+    except Exception as e:
+        job = db.query(CrawlJob).filter_by(id=job_id).first()
+        if job:
+            job.status = CrawlStatus.FAILED
+            job.error = str(e)
+            db.commit()
+    finally:
+        db.close()
+
+
+@knowledge_router.post("/crawl-store")
+async def crawl_store(
+    body: CrawlStoreRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Fetch all published blog articles from a Shopify store via API and add to KB."""
+    job = CrawlJob(
+        shop_domain=body.shop_domain,
+        url=f"https://{body.shop_domain}/blogs",
+        job_type="shopify_store",
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    background_tasks.add_task(_run_crawl_store, job.id, body.shop_domain)
+    return {"job_id": job.id, "status": job.status, "message": "Store crawl started"}
+
+
+_BLOGS_QUERY = """
+{
+  blogs(first: 20) {
+    nodes {
+      id handle title
+      articles(first: 250) {
+        nodes {
+          id title handle body isPublished publishedAt tags
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _run_crawl_store(job_id: int, shop_domain: str):
+    from app.config import settings
+    from app.api.auth_routes import get_store_token
+    from app.database import SessionLocal
+    from bs4 import BeautifulSoup
+    import html2text as _h2t
+
+    db = SessionLocal()
+    try:
+        job = db.query(CrawlJob).filter_by(id=job_id).first()
+        job.status = CrawlStatus.RUNNING
+        db.commit()
+
+        token = get_store_token(shop_domain, db) or settings.SHOPIFY_ACCESS_TOKEN
+        if not token:
+            raise ValueError(f"No Shopify access token for {shop_domain}")
+
+        endpoint = f"https://{shop_domain}/admin/api/{settings.SHOPIFY_API_VERSION}/graphql.json"
+        headers = {
+            "X-Shopify-Access-Token": token,
+            "Content-Type": "application/json",
+        }
+
+        resp = httpx.post(endpoint, json={"query": _BLOGS_QUERY}, headers=headers, timeout=60.0)
+        resp.raise_for_status()
+        blogs = resp.json().get("data", {}).get("blogs", {}).get("nodes", [])
+
+        h = _h2t.HTML2Text()
+        h.ignore_links = False
+        h.ignore_images = True
+        h.body_width = 0
+
+        kb = KnowledgeBase()
+        count = 0
+        for blog in blogs:
+            blog_handle = blog.get("handle", "news")
+            for article in blog.get("articles", {}).get("nodes", []):
+                if not article.get("isPublished"):
+                    continue
+                title = article.get("title") or ""
+                body_html = article.get("body") or ""
+                handle = article.get("handle") or ""
+                url = f"https://{shop_domain}/blogs/{blog_handle}/{handle}"
+
+                content_md = h.handle(body_html).strip() if body_html else title
+                soup = BeautifulSoup(body_html, "lxml") if body_html else None
+                content_text = soup.get_text(separator="\n", strip=True) if soup else title
+
+                try:
+                    kb.add_from_text(
+                        title=title,
+                        content_text=content_text or title,
+                        content_md=content_md or title,
+                        source_type="blog",
+                        shop_domain=shop_domain,
+                        db=db,
+                        source_url=url,
+                        auto_approve=True,  # own-store content is auto-approved
+                    )
+                    count += 1
+                except Exception:
+                    pass
 
         job.status = CrawlStatus.DONE
         job.items_found = count
