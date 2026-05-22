@@ -68,6 +68,7 @@ class ContentWriter:
         word_count: int,
         brand_profile: Optional[dict] = None,
         feedback_lessons: Optional[list] = None,
+        kb_context: str = "",
     ) -> tuple[str, str]:
         """Returns (system_prompt, user_prompt)."""
 
@@ -115,7 +116,7 @@ Writing rules:
 - Structure: intro → H2 sections → FAQ (from PAA) → conclusion
 - Use proper HTML tags: <h2>, <h3>, <p>, <ul>, <li>, <strong>
 - Never use <html>, <head>, <body> tags
-- End with a <section class="faq"> containing PAA questions as <h3> + <p> answers{lessons_ctx}"""
+- End with a <section class="faq"> containing PAA questions as <h3> + <p> answers{lessons_ctx}{kb_context}"""
 
         user = f"""Write a complete SEO article:
 
@@ -157,6 +158,7 @@ Respond in this exact format:
         exclude_slug: str = None,
         brand_profile: Optional[dict] = None,
         feedback_lessons: Optional[list] = None,
+        shop_domain: Optional[str] = None,
     ) -> dict:
         """Generate SEO article with internal + external links."""
 
@@ -170,11 +172,23 @@ Respond in this exact format:
                 db, focus_keyword, [], exclude_slug
             )
 
+        # Knowledge base context (avoid duplicates, guide internal links)
+        kb_context = ""
+        if db and shop_domain:
+            try:
+                from app.services.knowledge_base import KnowledgeBase
+                kb_context = KnowledgeBase().get_context_for_article(
+                    focus_keyword, title, shop_domain, db
+                )
+            except Exception:
+                pass
+
         system, user = self._build_prompt(
             title, focus_keyword, outline, paa_questions,
             external_refs, internal_posts, language, tone, word_count,
             brand_profile=brand_profile,
             feedback_lessons=feedback_lessons,
+            kb_context=kb_context,
         )
 
         message = self.client.chat.completions.create(

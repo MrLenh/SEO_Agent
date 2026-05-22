@@ -19,7 +19,14 @@ class TopicPlanner:
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
         self.analyzer = KeywordAnalyzer()
 
-    def _build_prompt(self, keyword: str, paa: list[str], related: list[str]) -> str:
+    def _build_prompt(
+        self, keyword: str, paa: list[str], related: list[str], existing_topics: list[str] = None
+    ) -> str:
+        existing_ctx = ""
+        if existing_topics:
+            existing_ctx = "\n\nExisting articles already published (DO NOT duplicate these topics — plan complementary content instead):\n"
+            existing_ctx += "\n".join(f"- {t}" for t in existing_topics)
+
         return f"""You are an SEO strategist. Create a comprehensive topic cluster for the seed keyword.
 
 Seed keyword: {keyword}
@@ -28,7 +35,7 @@ People Also Ask:
 {chr(10).join(f'- {q}' for q in paa) or '(none)'}
 
 Related searches:
-{chr(10).join(f'- {r}' for r in related) or '(none)'}
+{chr(10).join(f'- {r}' for r in related) or '(none)'}{existing_ctx}
 
 Return ONLY valid JSON (no markdown, no explanation):
 {{
@@ -71,7 +78,16 @@ Generate 5-7 supporting articles targeting the PAA questions and related searche
         # 1. Keyword research
         research = await self.analyzer.research(seed_keyword, country, language)
 
-        # 2. OpenAI generates cluster plan (JSON mode for reliable parsing)
+        # 2. Load existing KB topics to avoid duplication
+        existing_topics = []
+        if db:
+            try:
+                from app.services.knowledge_base import KnowledgeBase
+                existing_topics = KnowledgeBase().get_existing_topics(None, db)
+            except Exception:
+                pass
+
+        # 3. OpenAI generates cluster plan (JSON mode for reliable parsing)
         message = self.client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             max_tokens=2500,
@@ -83,6 +99,7 @@ Generate 5-7 supporting articles targeting the PAA questions and related searche
                         seed_keyword,
                         research["people_also_ask"],
                         research["related_searches"],
+                        existing_topics=existing_topics,
                     ),
                 }
             ],

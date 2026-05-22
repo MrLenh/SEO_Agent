@@ -154,6 +154,7 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
         exclude_slug=slug,
         brand_profile=brand_profile,
         feedback_lessons=feedback_lessons,
+        shop_domain=body.shop_domain or None,
     )
 
     # Save draft to DB

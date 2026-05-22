@@ -11,14 +11,17 @@ from app.api.audit_routes import audit_router
 from app.api.auth_routes import auth_router
 from app.api.content_routes import generate_router, research_router, topics_router
 from app.api.init_routes import blog_router, router as init_router
+from app.api.knowledge_routes import knowledge_router
 from app.api.publish_routes import publish_router
 from app.api.settings_routes import settings_router
 from app.api.user_routes import user_router
 from app.database import create_tables, get_db
-from app.models import shopify_store as _   # ensure table is registered
-from app.models import user as _u           # ensure user tables are registered
+from app.models import shopify_store as _    # ensure table is registered
+from app.models import user as _u            # ensure user tables are registered
 from app.models import brand_profile as _bp  # ensure brand_profiles table is registered
 from app.models import article_feedback as _af  # ensure article_feedback table is registered
+from app.models import knowledge_item as _ki    # ensure knowledge_items table is registered
+from app.models import crawl_job as _cj         # ensure crawl_jobs table is registered
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +102,7 @@ app.include_router(topics_router)
 app.include_router(generate_router)
 app.include_router(publish_router)
 app.include_router(settings_router)
+app.include_router(knowledge_router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

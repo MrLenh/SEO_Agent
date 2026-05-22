@@ -92,6 +92,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: rgb(55 65 81);
     <a class="nav-link" data-page="topics"    onclick="nav('topics')">🗂 Topic Clusters</a>
     <a class="nav-link" data-page="generate"  onclick="nav('generate')">✍️ Generate Article</a>
     <a class="nav-link" data-page="audit"     onclick="nav('audit')">📈 SEO Audit</a>
+    <a class="nav-link" data-page="knowledge" onclick="nav('knowledge')">🧠 Knowledge Base</a>
     <a class="nav-link" data-page="brand"     onclick="nav('brand')">🎨 Brand Profile</a>
     <div id="admin-nav" class="hidden">
       <div class="border-t border-indigo-900 my-2"></div>
@@ -215,7 +216,7 @@ function nav(page) {
     el.classList.toggle('active', el.dataset.page === page))
   const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', users: 'User Management', brand: 'Brand Profile' }
   document.getElementById('page-title').textContent = titles[page] || page
-  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, users: renderUsers, brand: renderBrand }
+  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, knowledge: renderKnowledge, users: renderUsers, brand: renderBrand }
   pages[page]?.()
 }
 
@@ -1837,6 +1838,333 @@ function selectShop(shop) {
   S.brandProfile = null; S.allBrands = []; S.selectedBrandDomain = null
   if (S.page === 'audit') renderAudit()
   if (S.page === 'brand') renderBrand()
+}
+
+// ══════════════════════ KNOWLEDGE BASE ═══════════════════════
+async function renderKnowledge() {
+  const shop = S.currentShop || ''
+  const sp = shop ? `?shop_domain=${encodeURIComponent(shop)}` : ''
+
+  document.getElementById('header-actions').innerHTML =
+    `<button class="btn btn-primary btn-sm" onclick="kbApproveAll()">✅ Approve All Pending</button>`
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="space-y-6">
+
+      <!-- Stats bar -->
+      <div id="kb-stats-bar" class="grid grid-cols-4 gap-4">${skeletons(1)}</div>
+
+      <!-- Two-column top row -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- Crawl & Import -->
+        <div class="card">
+          <div class="text-sm font-semibold text-gray-700 mb-3">🌐 Crawl & Import Blog Content</div>
+          <p class="text-xs text-gray-400 mb-3">Enter a blog post URL to crawl it into the knowledge base, or check "crawl index" to follow all article links on a listing page.</p>
+          <div class="space-y-2">
+            <input id="kb-url" class="input" placeholder="https://yourbrand.com/blogs/news/article-slug">
+            <label class="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" id="kb-index" class="rounded"> Crawl blog index (follow all article links)
+            </label>
+            <button class="btn btn-primary btn-sm w-full" style="justify-content:center" id="kb-crawl-btn" onclick="kbCrawl()">
+              🌐 Start Crawl
+            </button>
+          </div>
+          <div id="kb-crawl-status" class="text-xs text-gray-400 mt-2"></div>
+          <!-- Recent jobs -->
+          <div id="kb-jobs" class="mt-3 space-y-1 text-xs"></div>
+        </div>
+
+        <!-- Market Trend Research -->
+        <div class="card">
+          <div class="text-sm font-semibold text-gray-700 mb-3">📊 Market Trend Research</div>
+          <p class="text-xs text-gray-400 mb-3">Research keyword trends, content gaps, and new opportunities. Results are saved to the knowledge base automatically.</p>
+          <input id="kb-trend-kw" class="input mb-2" placeholder="e.g. ginger wellness tea">
+          <button class="btn btn-secondary btn-sm w-full" style="justify-content:center" id="kb-trend-btn" onclick="kbTrend()">
+            🔍 Research Trend
+          </button>
+          <div id="kb-trend-result" class="mt-3 text-xs"></div>
+        </div>
+      </div>
+
+      <!-- Ranking Analysis -->
+      <div class="card">
+        <div class="text-sm font-semibold text-gray-700 mb-2">📈 Ranking Analysis → Writing Lessons</div>
+        <p class="text-xs text-gray-400 mb-3">Analyze your GSC ranking data to extract writing lessons and keyword groups. Results are saved to the knowledge base.</p>
+        <button class="btn btn-secondary btn-sm" id="kb-rank-btn" onclick="kbAnalyzeRankings()">
+          📈 Analyze Rankings from GSC
+        </button>
+        <div id="kb-rank-result" class="mt-3 text-xs"></div>
+      </div>
+
+      <!-- Search -->
+      <div class="card">
+        <div class="text-sm font-semibold text-gray-700 mb-3">🧠 Knowledge Items</div>
+        <div class="flex gap-2 mb-3 flex-wrap">
+          <input id="kb-search" class="input flex-1" placeholder="Search by title…" oninput="kbLoadItems()" style="min-width:160px">
+          <select id="kb-filter-status" class="input" style="width:auto" onchange="kbLoadItems()">
+            <option value="">All Status</option>
+            <option value="pending">🕐 Pending</option>
+            <option value="approved">✅ Approved</option>
+            <option value="rejected">❌ Rejected</option>
+          </select>
+          <select id="kb-filter-type" class="input" style="width:auto" onchange="kbLoadItems()">
+            <option value="">All Types</option>
+            <option value="blog">Blog</option>
+            <option value="product">Product</option>
+            <option value="trend">Trend</option>
+            <option value="analysis">Analysis</option>
+            <option value="feedback">Feedback</option>
+            <option value="manual">Manual</option>
+          </select>
+        </div>
+        <div id="kb-items-list">${skeletons(3)}</div>
+        <div id="kb-items-pagination" class="mt-3 flex gap-2 justify-center text-sm"></div>
+      </div>
+
+    </div>`
+
+  kbLoadStats()
+  kbLoadItems()
+  kbLoadJobs()
+}
+
+// ── KB Stats ──────────────────────────────────────────────────
+async function kbLoadStats() {
+  const shop = S.currentShop || ''
+  const sp = shop ? `?shop_domain=${encodeURIComponent(shop)}` : ''
+  try {
+    const s = await GET(`/api/v1/knowledge/stats${sp}`)
+    document.getElementById('kb-stats-bar').innerHTML = `
+      <div class="card text-center py-3"><div class="text-2xl font-bold text-indigo-600">${s.total}</div><div class="text-xs text-gray-400 mt-1">Total Items</div></div>
+      <div class="card text-center py-3"><div class="text-2xl font-bold text-green-600">${s.approved}</div><div class="text-xs text-gray-400 mt-1">Approved</div></div>
+      <div class="card text-center py-3"><div class="text-2xl font-bold text-yellow-500">${s.pending}</div><div class="text-xs text-gray-400 mt-1">Pending Review</div></div>
+      <div class="card text-center py-3"><div class="text-2xl font-bold text-gray-500">${s.rejected}</div><div class="text-xs text-gray-400 mt-1">Rejected</div></div>`
+  } catch(e) {
+    document.getElementById('kb-stats-bar').innerHTML = `<div class="text-xs text-red-500">${esc(e.message)}</div>`
+  }
+}
+
+// ── KB Items ──────────────────────────────────────────────────
+let _kbPage = 1
+async function kbLoadItems(page = 1) {
+  _kbPage = page
+  const shop = S.currentShop || ''
+  const q = document.getElementById('kb-search')?.value?.trim() || ''
+  const status = document.getElementById('kb-filter-status')?.value || ''
+  const type = document.getElementById('kb-filter-type')?.value || ''
+  const params = new URLSearchParams({ page, limit: 20 })
+  if (shop) params.set('shop_domain', shop)
+  if (q) params.set('q', q)
+  if (status) params.set('status', status)
+  if (type) params.set('source_type', type)
+
+  const el = document.getElementById('kb-items-list')
+  if (!el) return
+  el.innerHTML = skeletons(3)
+  try {
+    const data = await GET(`/api/v1/knowledge/items?${params}`)
+    if (!data.items.length) {
+      el.innerHTML = `<div class="text-sm text-gray-400 text-center py-6">No items found.</div>`
+      document.getElementById('kb-items-pagination').innerHTML = ''
+      return
+    }
+    const statusBadgeKb = s => ({
+      pending:  '<span class="badge badge-yellow">Pending</span>',
+      approved: '<span class="badge badge-green">Approved</span>',
+      rejected: '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Rejected</span>',
+    }[s] || s)
+    const typeIcon = t => ({ blog:'📄', product:'🛒', trend:'📊', analysis:'📈', feedback:'💬', manual:'✏️' }[t] || '📎')
+    el.innerHTML = `<table class="w-full text-sm">
+      <thead><tr class="text-left text-xs text-gray-400 border-b">
+        <th class="pb-2 font-medium">Title</th>
+        <th class="pb-2 font-medium">Type</th>
+        <th class="pb-2 font-medium">Words</th>
+        <th class="pb-2 font-medium">Status</th>
+        <th class="pb-2 font-medium">Actions</th>
+      </tr></thead>
+      <tbody>
+        ${data.items.map(i => `<tr class="border-b border-gray-50 table-row">
+          <td class="py-2 pr-3 max-w-xs truncate" title="${esc(i.title||'')}">
+            ${typeIcon(i.source_type)} ${esc(i.title||'(untitled)')}
+            ${i.source_url ? `<a href="${esc(i.source_url)}" target="_blank" class="text-indigo-400 ml-1 text-xs">↗</a>` : ''}
+          </td>
+          <td class="py-2 pr-3 text-gray-400">${esc(i.source_type)}</td>
+          <td class="py-2 pr-3 text-gray-400">${i.word_count||0}</td>
+          <td class="py-2 pr-3">${statusBadgeKb(i.status)}</td>
+          <td class="py-2">
+            <div class="flex gap-1 action-btns opacity-0">
+              ${i.status !== 'approved' ? `<button class="btn btn-sm" style="background:#dcfce7;color:#166534;font-size:11px;padding:2px 8px" onclick="kbSetStatus(${i.id},'approved')">✅</button>` : ''}
+              ${i.status !== 'rejected' ? `<button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;font-size:11px;padding:2px 8px" onclick="kbSetStatus(${i.id},'rejected')">❌</button>` : ''}
+              ${i.status !== 'pending'  ? `<button class="btn btn-sm" style="background:#f3f4f6;color:#374151;font-size:11px;padding:2px 8px" onclick="kbSetStatus(${i.id},'pending')">🕐</button>` : ''}
+              <button class="btn btn-sm" style="background:#f3f4f6;color:#374151;font-size:11px;padding:2px 8px" onclick="kbViewItem(${i.id})">View</button>
+              <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;font-size:11px;padding:2px 8px" onclick="kbDeleteItem(${i.id})">🗑</button>
+            </div>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`
+
+    // Pagination
+    const totalPages = Math.ceil(data.total / 20)
+    const pg = document.getElementById('kb-items-pagination')
+    pg.innerHTML = totalPages > 1
+      ? Array.from({length: totalPages}, (_,i) => `<button class="btn btn-sm ${i+1===page?'btn-primary':'btn-secondary'}" onclick="kbLoadItems(${i+1})">${i+1}</button>`).join('')
+      : ''
+  } catch(e) {
+    el.innerHTML = `<div class="text-red-500 text-xs">Error: ${esc(e.message)}</div>`
+  }
+}
+
+async function kbSetStatus(id, status) {
+  try {
+    await PUT(`/api/v1/knowledge/items/${id}/status`, { status })
+    kbLoadItems(_kbPage)
+    kbLoadStats()
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function kbDeleteItem(id) {
+  if (!confirm('Delete this knowledge item?')) return
+  try {
+    await DEL(`/api/v1/knowledge/items/${id}`)
+    toast('Deleted', 'success')
+    kbLoadItems(_kbPage)
+    kbLoadStats()
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function kbViewItem(id) {
+  try {
+    const item = await GET(`/api/v1/knowledge/items/${id}`)
+    openModal(item.title || 'Knowledge Item', `
+      <div class="text-xs text-gray-400 mb-2">${esc(item.source_type)} · ${item.status}${item.source_url ? ` · <a href="${esc(item.source_url)}" target="_blank" class="text-indigo-400">source ↗</a>` : ''}</div>
+      <div class="border rounded-lg p-3 bg-gray-50 overflow-auto" style="max-height:400px;font-size:12px;white-space:pre-wrap;font-family:monospace">${esc(item.content_md||'(no content)')}</div>`,
+      `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>`)
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function kbApproveAll() {
+  const shop = S.currentShop || ''
+  const sp = shop ? `?shop_domain=${encodeURIComponent(shop)}` : ''
+  try {
+    const r = await PUT(`/api/v1/knowledge/items/approve-all${sp}`)
+    toast(`✅ ${r.approved} items approved`, 'success')
+    kbLoadItems(1)
+    kbLoadStats()
+  } catch(e) { toast(e.message, 'error') }
+}
+
+// ── Crawl ──────────────────────────────────────────────────────
+async function kbCrawl() {
+  const url = document.getElementById('kb-url')?.value?.trim()
+  if (!url) { toast('Enter a URL', 'error'); return }
+  const crawlIndex = document.getElementById('kb-index')?.checked || false
+  const btn = document.getElementById('kb-crawl-btn')
+  const status = document.getElementById('kb-crawl-status')
+  btn.disabled = true; btn.textContent = 'Crawling…'
+  status.textContent = 'Starting crawl…'
+  try {
+    const r = await POST('/api/v1/knowledge/crawl', {
+      url, shop_domain: S.currentShop || null, crawl_index: crawlIndex
+    })
+    status.textContent = `✅ Job #${r.job_id} started. Check jobs below for progress.`
+    document.getElementById('kb-url').value = ''
+    setTimeout(kbLoadJobs, 2000)
+    setTimeout(() => { kbLoadJobs(); kbLoadItems(); kbLoadStats() }, 8000)
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message
+  } finally {
+    btn.disabled = false; btn.textContent = '🌐 Start Crawl'
+  }
+}
+
+async function kbLoadJobs() {
+  const shop = S.currentShop || ''
+  const sp = shop ? `?shop_domain=${encodeURIComponent(shop)}` : ''
+  const el = document.getElementById('kb-jobs')
+  if (!el) return
+  try {
+    const jobs = await GET(`/api/v1/knowledge/jobs${sp}`)
+    if (!jobs.length) { el.innerHTML = ''; return }
+    const statusIcon = s => ({queued:'🕐',running:'⏳',done:'✅',failed:'❌'}[s]||s)
+    el.innerHTML = `<div class="text-xs font-medium text-gray-500 mb-1">Recent crawl jobs:</div>` +
+      jobs.slice(0,5).map(j => `<div class="flex items-center gap-2 py-1 border-b border-gray-50">
+        <span>${statusIcon(j.status)}</span>
+        <span class="truncate flex-1 text-gray-600" title="${esc(j.url)}">${esc(j.url.slice(0,60))}${j.url.length>60?'…':''}</span>
+        <span class="text-gray-400">${j.items_found||0} items</span>
+        ${j.error ? `<span class="text-red-400" title="${esc(j.error)}">⚠</span>` : ''}
+      </div>`).join('')
+  } catch(_) {}
+}
+
+// ── Trend Research ─────────────────────────────────────────────
+async function kbTrend() {
+  const kw = document.getElementById('kb-trend-kw')?.value?.trim()
+  if (!kw) { toast('Enter a keyword', 'error'); return }
+  const btn = document.getElementById('kb-trend-btn')
+  const result = document.getElementById('kb-trend-result')
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Researching…'
+  result.innerHTML = 'Analyzing market trends…'
+  try {
+    const r = await POST('/api/v1/knowledge/trend', {
+      seed_keyword: kw, shop_domain: S.currentShop || null
+    })
+    const ins = r.insights
+    result.innerHTML = `
+      <div class="bg-indigo-50 rounded-lg p-3 space-y-2">
+        <div class="font-medium text-indigo-800">${esc(ins.trend_summary||'')}</div>
+        ${ins.new_keywords?.length ? `<div><span class="text-gray-500 text-xs">New keywords:</span> ${ins.new_keywords.map(k=>`<span class="badge badge-yellow ml-1">${esc(k)}</span>`).join('')}</div>` : ''}
+        ${ins.content_gaps?.length ? `<div class="text-xs text-gray-600">Content gaps: ${ins.content_gaps.join(' · ')}</div>` : ''}
+        ${ins.recommended_titles?.length ? `<div class="text-xs">
+          <div class="text-gray-500 mb-1">Article ideas:</div>
+          ${ins.recommended_titles.map(t=>`<div class="flex items-center gap-1">• <a class="text-indigo-500 cursor-pointer" onclick="prefillGenerateKw(${JSON.stringify(esc(kw))},${JSON.stringify(esc(t))})">${esc(t)}</a></div>`).join('')}
+        </div>` : ''}
+        <div class="text-xs text-green-600">✅ Saved to Knowledge Base (item #${r.item_id})</div>
+      </div>`
+    kbLoadStats()
+    kbLoadItems()
+  } catch(e) {
+    result.innerHTML = `<div class="text-red-500">Error: ${esc(e.message)}</div>`
+  } finally {
+    btn.disabled = false; btn.textContent = '🔍 Research Trend'
+  }
+}
+
+// ── Ranking Analysis ───────────────────────────────────────────
+async function kbAnalyzeRankings() {
+  const btn = document.getElementById('kb-rank-btn')
+  const result = document.getElementById('kb-rank-result')
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Fetching GSC data…'
+  result.innerHTML = ''
+  try {
+    const shop = S.currentShop || ''
+    const sp = shop ? `?shop_domain=${encodeURIComponent(shop)}&days=28` : '?days=28'
+    const queries = await GET(`/api/v1/audit/gsc/queries${sp}&limit=30`)
+    if (!queries.length) {
+      result.innerHTML = '<div class="text-gray-400 text-xs">No GSC ranking data found. Connect GSC in Brand Profile first.</div>'
+      return
+    }
+    result.innerHTML = `Analyzing ${queries.length} keywords with GPT-4o…`
+    const r = await POST('/api/v1/knowledge/analyze-rankings', {
+      rankings: queries.map(q => ({ keyword: q.query, position: q.position, clicks: q.clicks, impressions: q.impressions })),
+      shop_domain: shop || null
+    })
+    const a = r.analysis
+    result.innerHTML = `
+      <div class="bg-green-50 rounded-lg p-3 space-y-2">
+        <div class="font-medium text-green-800">${esc(a.performance_summary||'')}</div>
+        ${a.writing_lessons?.length ? `<div class="text-xs"><div class="text-gray-500 mb-1">Writing lessons:</div>${a.writing_lessons.map(l=>`<div>• ${esc(l)}</div>`).join('')}</div>` : ''}
+        ${a.improvement_priorities?.length ? `<div class="text-xs text-gray-600 mt-1"><b>Priorities:</b> ${a.improvement_priorities.join(' · ')}</div>` : ''}
+        <div class="text-xs text-green-600">✅ Saved to Knowledge Base (item #${r.item_id})</div>
+      </div>`
+    kbLoadStats()
+    kbLoadItems()
+  } catch(e) {
+    result.innerHTML = `<div class="text-red-500">Error: ${esc(e.message)}</div>`
+  } finally {
+    btn.disabled = false; btn.textContent = '📈 Analyze Rankings from GSC'
+  }
 }
 
 // ══════════════════════ BRAND PROFILE ════════════════════════
