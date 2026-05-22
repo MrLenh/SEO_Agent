@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SEO Agent</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.nav-link {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: 8px; cursor: pointer;
+  color: rgb(165 180 252); font-size: 14px; transition: all .15s;
+  text-decoration: none;
+}
+.nav-link:hover { background: rgba(99,102,241,.2); color: white; }
+.nav-link.active { background: rgb(79 70 229); color: white; font-weight: 500; }
+.card { background: white; border-radius: 12px; border: 1px solid rgb(229 231 235); padding: 20px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border-radius: 8px; font-size: 14px;
+  font-weight: 500; cursor: pointer; transition: all .15s;
+  border: none; white-space: nowrap;
+}
+.btn:disabled { opacity: .6; cursor: not-allowed; }
+.btn-primary { background: rgb(79 70 229); color: white; }
+.btn-primary:hover:not(:disabled) { background: rgb(67 56 202); }
+.btn-success { background: rgb(22 163 74); color: white; }
+.btn-success:hover:not(:disabled) { background: rgb(21 128 61); }
+.btn-danger { background: rgb(220 38 38); color: white; }
+.btn-secondary { background: white; color: rgb(55 65 81); border: 1px solid rgb(209 213 219); }
+.btn-secondary:hover:not(:disabled) { background: rgb(249 250 251); }
+.btn-sm { padding: 5px 12px; font-size: 13px; }
+.badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 100px; font-size: 12px; font-weight: 500; }
+.badge-green { background: rgb(220 252 231); color: rgb(22 101 52); }
+.badge-yellow { background: rgb(254 249 195); color: rgb(133 77 14); }
+.badge-blue { background: rgb(219 234 254); color: rgb(30 64 175); }
+.badge-purple { background: rgb(243 232 255); color: rgb(109 40 217); }
+.badge-gray { background: rgb(243 244 246); color: rgb(75 85 99); }
+input[type=text], input[type=number], select, textarea {
+  width: 100%; padding: 8px 12px; border: 1px solid rgb(209 213 219);
+  border-radius: 8px; font-size: 14px; outline: none;
+  transition: border-color .15s; background: white; box-sizing: border-box;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: rgb(99 102 241);
+  box-shadow: 0 0 0 3px rgba(99,102,241,.1);
+}
+label { display: block; font-size: 13px; font-weight: 500; color: rgb(55 65 81); margin-bottom: 4px; }
+.spinner {
+  width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.35);
+  border-top-color: white; border-radius: 50%;
+  animation: spin .6s linear infinite; display: inline-block; flex-shrink: 0;
+}
+.spinner-dark {
+  width: 32px; height: 32px; border: 3px solid rgb(229 231 235);
+  border-top-color: rgb(79 70 229); border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.skeleton {
+  background: linear-gradient(90deg, #f3f4f6 25%, #e9eaec 50%, #f3f4f6 75%);
+  background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 6px;
+}
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.table-row:hover td { background: rgb(249 250 251); }
+.action-btns { opacity: 0; transition: opacity .15s; }
+.table-row:hover .action-btns { opacity: 1; }
+</style>
+</head>
+<body class="bg-gray-100 h-screen flex overflow-hidden">
+
+<!-- ── Sidebar ─────────────────────────────────────────────── -->
+<aside class="w-56 bg-indigo-950 flex flex-col shrink-0">
+  <div class="px-5 py-5 border-b border-indigo-900">
+    <div class="text-white font-bold">🤖 SEO Agent</div>
+    <div class="text-indigo-400 text-xs mt-0.5">AI Content Platform</div>
+  </div>
+  <nav id="sidebar-nav" class="flex-1 px-3 py-4 space-y-0.5">
+    <a class="nav-link active" data-page="dashboard" onclick="nav('dashboard')">📊 Dashboard</a>
+    <a class="nav-link" data-page="posts"     onclick="nav('posts')">📝 Blog Posts</a>
+    <a class="nav-link" data-page="research"  onclick="nav('research')">🔍 Keyword Research</a>
+    <a class="nav-link" data-page="topics"    onclick="nav('topics')">🗂 Topic Clusters</a>
+    <a class="nav-link" data-page="generate"  onclick="nav('generate')">✍️ Generate Article</a>
+  </nav>
+  <div class="px-5 py-3">
+    <div class="text-indigo-600 text-xs">v0.3.0 · Phase 3A/3B</div>
+  </div>
+</aside>
+
+<!-- ── Main area ───────────────────────────────────────────── -->
+<div class="flex-1 flex flex-col overflow-hidden">
+  <header class="bg-white border-b border-gray-200 px-6 h-14 flex items-center justify-between shrink-0">
+    <h1 id="page-title" class="text-base font-semibold text-gray-800">Dashboard</h1>
+    <div id="header-actions" class="flex items-center gap-2"></div>
+  </header>
+  <main id="content" class="flex-1 overflow-auto p-6"></main>
+</div>
+
+<!-- ── Toast ──────────────────────────────────────────────── -->
+<div id="toasts" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 items-end pointer-events-none"></div>
+
+<!-- ── Modal ──────────────────────────────────────────────── -->
+<div id="modal-bg" class="hidden fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4"
+  onclick="if(event.target===this)closeModal()">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
+      <h3 id="modal-title" class="font-semibold text-gray-800 text-sm truncate pr-4"></h3>
+      <button onclick="closeModal()" class="text-gray-400 hover:text-gray-700 text-xl leading-none shrink-0">×</button>
+    </div>
+    <div id="modal-body" class="flex-1 overflow-auto p-5"></div>
+    <div id="modal-footer" class="px-5 py-4 border-t border-gray-100 flex gap-2 justify-end shrink-0"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════ STATE ═══════════════════════════
+const S = {
+  page: 'dashboard',
+  posts: [],
+  postsPage: 1,
+  postsSource: '',
+  postsSearch: '',
+  postsStatus: '',
+  channels: [],
+  research: null,
+  generated: null,
+  topicPlan: null,
+}
+let outlineItems = ['Giới thiệu', 'Nội dung chính', 'Lưu ý quan trọng', 'FAQ']
+
+// ═══════════════════════════ API ═════════════════════════════
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } }
+  if (body !== undefined) opts.body = JSON.stringify(body)
+  const r = await fetch(path, opts)
+  const text = await r.text()
+  let data
+  try { data = JSON.parse(text) } catch { data = { detail: text } }
+  if (!r.ok) throw new Error(data?.detail || `HTTP ${r.status}`)
+  return data
+}
+const GET = p => api('GET', p)
+const POST = (p, b) => api('POST', p, b)
+
+// ═══════════════════════════ TOAST ═══════════════════════════
+function toast(msg, type = 'info') {
+  const colors = { success: 'bg-green-600', error: 'bg-red-600', info: 'bg-indigo-600' }
+  const el = document.createElement('div')
+  el.className = `pointer-events-auto px-4 py-3 rounded-xl text-white text-sm shadow-lg max-w-sm ${colors[type]}`
+  el.textContent = msg
+  document.getElementById('toasts').appendChild(el)
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300) }, 4000)
+}
+
+// ═══════════════════════════ MODAL ═══════════════════════════
+function openModal(title, bodyHtml, footerHtml = '') {
+  document.getElementById('modal-title').textContent = title
+  document.getElementById('modal-body').innerHTML = bodyHtml
+  document.getElementById('modal-footer').innerHTML = footerHtml
+  document.getElementById('modal-bg').classList.remove('hidden')
+}
+function closeModal() {
+  document.getElementById('modal-bg').classList.add('hidden')
+}
+
+// ═══════════════════════════ NAV ═════════════════════════════
+function nav(page) {
+  S.page = page
+  document.querySelectorAll('.nav-link').forEach(el =>
+    el.classList.toggle('active', el.dataset.page === page))
+  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article' }
+  document.getElementById('page-title').textContent = titles[page] || page
+  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate }
+  pages[page]?.()
+}
+
+// ─────────────────────────── helpers ─────────────────────────
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')
+}
+function statusBadge(s) {
+  const m = { published: 'badge-green', draft: 'badge-yellow' }
+  return `<span class="badge ${m[s]||'badge-gray'}">${esc(s||'?')}</span>`
+}
+function sourceBadge(s) {
+  const m = { synced: 'badge-blue', generated: 'badge-purple' }
+  return `<span class="badge ${m[s]||'badge-gray'}">${esc(s||'?')}</span>`
+}
+function skeletons(n, h = 'h-8') {
+  return Array(n).fill(`<div class="skeleton ${h} mb-2 rounded-lg"></div>`).join('')
+}
+function loading(el, html) { if (el) el.innerHTML = html }
+
+// ═══════════════════════ DASHBOARD ═══════════════════════════
+async function renderDashboard() {
+  document.getElementById('header-actions').innerHTML =
+    `<button class="btn btn-primary btn-sm" id="sync-btn" onclick="syncShopify()">🔄 Sync Shopify</button>`
+
+  document.getElementById('content').innerHTML = `
+    <div class="grid grid-cols-4 gap-4 mb-5" id="stat-cards">${skeletons(4,'h-24')}</div>
+    <div class="card">
+      <div class="text-sm font-semibold text-gray-700 mb-3">Recent Posts</div>
+      <div id="recent-posts">${skeletons(5)}</div>
+    </div>`
+
+  try {
+    const [posts, clusters] = await Promise.all([
+      GET('/api/v1/blogs/?limit=10&page=1'),
+      GET('/api/v1/topics/?limit=100'),
+    ])
+    const published = posts.filter(p => p.status === 'published').length
+    const drafts    = posts.filter(p => p.status === 'draft').length
+
+    document.getElementById('stat-cards').innerHTML = [
+      { icon: '📝', label: 'Total Posts',     value: posts.length,     color: 'indigo' },
+      { icon: '✅', label: 'Published',        value: published,        color: 'green'  },
+      { icon: '📋', label: 'Drafts',           value: drafts,           color: 'yellow' },
+      { icon: '🗂', label: 'Topic Clusters',   value: clusters.length,  color: 'purple' },
+    ].map(s => `
+      <div class="card flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow" onclick="nav('posts')">
+        <div class="text-3xl">${s.icon}</div>
+        <div>
+          <div class="text-2xl font-bold text-gray-800">${s.value}</div>
+          <div class="text-sm text-gray-400">${s.label}</div>
+        </div>
+      </div>`).join('')
+
+    document.getElementById('recent-posts').innerHTML = posts.length === 0
+      ? `<div class="text-sm text-gray-400 py-6 text-center">No posts yet. Sync Shopify or generate an article.</div>`
+      : `<table class="w-full text-sm">
+          <thead><tr class="text-left text-gray-400 border-b text-xs uppercase">
+            <th class="pb-2 font-medium">Title</th>
+            <th class="pb-2 font-medium">Keyword</th>
+            <th class="pb-2 font-medium">Status</th>
+            <th class="pb-2 font-medium">Source</th>
+          </tr></thead>
+          <tbody>${posts.map(p => `
+            <tr class="border-b border-gray-50 table-row cursor-pointer" onclick="nav('posts')">
+              <td class="py-2 font-medium text-gray-800 max-w-xs"><div class="truncate">${esc(p.title)}</div></td>
+              <td class="py-2 text-gray-500 max-w-[130px]"><div class="truncate">${esc(p.focus_keyword||'—')}</div></td>
+              <td class="py-2">${statusBadge(p.status)}</td>
+              <td class="py-2">${sourceBadge(p.source)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`
+  } catch(e) { toast('Load failed: ' + e.message, 'error') }
+}
+
+async function syncShopify() {
+  const btn = document.getElementById('sync-btn')
+  btn.disabled = true
+  btn.innerHTML = `<span class="spinner"></span> Syncing…`
+  try {
+    const r = await POST('/api/v1/init/shopify')
+    toast(`✅ Synced: ${r.articles_synced} new · ${r.articles_updated} updated`, 'success')
+    renderDashboard()
+  } catch(e) { toast('Sync failed: ' + e.message, 'error') }
+  finally { btn.disabled = false; btn.innerHTML = '🔄 Sync Shopify' }
+}
+
+// ═══════════════════════ BLOG POSTS ══════════════════════════
+async function renderPosts() {
+  document.getElementById('header-actions').innerHTML =
+    `<button class="btn btn-primary btn-sm" onclick="nav('generate')">✍️ New Article</button>`
+
+  document.getElementById('content').innerHTML = `
+    <div class="card mb-4">
+      <div class="flex gap-3">
+        <input type="text" id="ps-search" placeholder="Search title or keyword…" value="${esc(S.postsSearch)}"
+          style="flex:1" onkeyup="if(event.key==='Enter'){S.postsSearch=this.value;S.postsPage=1;loadPosts()}">
+        <select id="ps-source" style="width:150px" onchange="S.postsSource=this.value;S.postsPage=1;loadPosts()">
+          <option value="">All sources</option>
+          <option value="synced"    ${S.postsSource==='synced'?'selected':''}>Synced</option>
+          <option value="generated" ${S.postsSource==='generated'?'selected':''}>Generated</option>
+        </select>
+        <select id="ps-status" style="width:140px" onchange="S.postsStatus=this.value;S.postsPage=1;loadPosts()">
+          <option value="">All status</option>
+          <option value="published" ${S.postsStatus==='published'?'selected':''}>Published</option>
+          <option value="draft"     ${S.postsStatus==='draft'?'selected':''}>Draft</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="S.postsSearch=document.getElementById('ps-search').value;S.postsPage=1;loadPosts()">Search</button>
+      </div>
+    </div>
+    <div class="card">
+      <div id="posts-table">${skeletons(8)}</div>
+      <div id="posts-pager" class="mt-4 flex justify-between items-center text-sm text-gray-500"></div>
+    </div>`
+
+  loadPosts()
+}
+
+async function loadPosts() {
+  const q = new URLSearchParams({
+    page: S.postsPage, limit: 20,
+    ...(S.postsSource && { source: S.postsSource }),
+    ...(S.postsSearch && { keyword: S.postsSearch }),
+  })
+  try {
+    let posts = await GET(`/api/v1/blogs/?${q}`)
+    if (S.postsStatus) posts = posts.filter(p => p.status === S.postsStatus)
+    S.posts = posts
+
+    const tbl = document.getElementById('posts-table')
+    if (!tbl) return
+
+    if (!posts.length) {
+      tbl.innerHTML = `<div class="py-12 text-center text-gray-400 text-sm">No posts found.</div>`
+      return
+    }
+
+    tbl.innerHTML = `
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-gray-400 border-b text-xs uppercase">
+          <th class="pb-3 font-medium">Title</th>
+          <th class="pb-3 font-medium w-36">Keyword</th>
+          <th class="pb-3 font-medium w-24">Status</th>
+          <th class="pb-3 font-medium w-24">Source</th>
+          <th class="pb-3 font-medium w-32">Actions</th>
+        </tr></thead>
+        <tbody>${posts.map(p => `
+          <tr class="border-b border-gray-50 table-row">
+            <td class="py-3 pr-3">
+              <div class="font-medium text-gray-800 truncate max-w-xs">${esc(p.title)}</div>
+              ${p.platform_url
+                ? `<a href="${esc(p.platform_url)}" target="_blank" class="text-xs text-indigo-500 hover:underline">View on store ↗</a>`
+                : `<span class="text-xs text-gray-300">Not published</span>`}
+            </td>
+            <td class="py-3 pr-3 text-gray-500 truncate max-w-[144px]">${esc(p.focus_keyword||'—')}</td>
+            <td class="py-3 pr-3">${statusBadge(p.status)}</td>
+            <td class="py-3 pr-3">${sourceBadge(p.source)}</td>
+            <td class="py-3">
+              <div class="action-btns flex gap-1">
+                <button class="btn btn-secondary btn-sm" onclick="viewPost(${p.id})">View</button>
+                ${p.status==='draft'
+                  ? `<button class="btn btn-success btn-sm" onclick="openPublishModal(${p.id},'${esc(p.title)}')">Publish</button>`
+                  : ''}
+              </div>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`
+  } catch(e) {
+    const tbl = document.getElementById('posts-table')
+    if (tbl) tbl.innerHTML = `<div class="text-red-500 text-sm py-4 text-center">Error: ${esc(e.message)}</div>`
+  }
+}
+
+async function viewPost(id) {
+  openModal('Loading…', `<div class="flex items-center justify-center py-12"><div class="spinner-dark"></div></div>`)
+  try {
+    const p = await GET(`/api/v1/generate/article/${id}/content`)
+    document.getElementById('modal-title').textContent = p.title
+    document.getElementById('modal-body').innerHTML = `
+      <div class="flex gap-2 flex-wrap mb-3">${statusBadge(p.status)}</div>
+      <div class="text-xs bg-gray-50 rounded-lg p-3 space-y-1 mb-3">
+        <div><span class="text-gray-400">SEO Title:</span> ${esc(p.seo_title||'—')}</div>
+        <div><span class="text-gray-400">Meta:</span> ${esc(p.seo_description||'—')}</div>
+        <div><span class="text-gray-400">Tags:</span> ${(p.tags||[]).join(', ')||'—'}</div>
+      </div>
+      <div class="border border-gray-200 rounded-xl overflow-hidden">
+        <iframe id="preview-frame" class="w-full" style="height:380px" frameborder="0" sandbox="allow-same-origin"></iframe>
+      </div>`
+
+    const iframe = document.getElementById('preview-frame')
+    if (iframe) iframe.srcdoc =
+      `<style>body{font-family:system-ui,sans-serif;padding:20px;font-size:14px;line-height:1.7;max-width:760px;margin:0 auto;color:#1f2937}h1,h2,h3{color:#111827}a{color:#4f46e5}</style>` +
+      (p.content_html || '')
+
+    document.getElementById('modal-footer').innerHTML = `
+      ${p.status === 'draft'
+        ? `<button class="btn btn-success btn-sm" onclick="closeModal();openPublishModal(${id},'${esc(p.title)}')">🚀 Publish to Shopify</button>`
+        : ''}
+      <button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>`
+  } catch(e) {
+    document.getElementById('modal-body').innerHTML = `<div class="text-red-500 text-sm">Error: ${esc(e.message)}</div>`
+  }
+}
+
+// ─────────────────── Publish modal ────────────────────────────
+function openPublishModal(postId, title) {
+  const chOpts = S.channels.map(c =>
+    `<option value="${esc(c.platform_id)}">${esc(c.title)} (ID: ${c.platform_id})</option>`).join('')
+
+  openModal(`Publish: ${title}`, `
+    <div class="space-y-4">
+      <div>
+        <label>Shopify Blog ID <span class="text-red-500">*</span></label>
+        <input type="number" id="pub-blog-id" placeholder="e.g. 12345678">
+        ${chOpts ? `<select class="mt-2" onchange="document.getElementById('pub-blog-id').value=this.value">
+          <option value="">— Pick from synced blogs —</option>${chOpts}
+        </select>` : `<div class="text-xs text-gray-400 mt-1">Shopify Admin → Online Store → Blog posts → copy numeric ID from URL</div>`}
+      </div>
+      <div>
+        <label>Author</label>
+        <input type="text" id="pub-author" value="SEO Agent">
+      </div>
+      <div class="flex items-center gap-3 py-1">
+        <input type="checkbox" id="pub-image" checked class="w-4 h-4 rounded accent-indigo-600">
+        <label for="pub-image" class="!mb-0 cursor-pointer">Generate DALL·E 3 banner image</label>
+      </div>
+      <div class="flex items-center gap-3 py-1">
+        <input type="checkbox" id="pub-live" checked class="w-4 h-4 rounded accent-indigo-600">
+        <label for="pub-live" class="!mb-0 cursor-pointer">Publish immediately (uncheck = save as Shopify draft)</label>
+      </div>
+    </div>`,
+    `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
+     <button class="btn btn-primary btn-sm" id="do-pub-btn" onclick="doPublish(${postId})">🚀 Publish</button>`)
+}
+
+async function doPublish(postId) {
+  const blogId = parseInt(document.getElementById('pub-blog-id').value)
+  if (!blogId) { toast('Enter a Shopify Blog ID', 'error'); return }
+
+  const genImage  = document.getElementById('pub-image').checked
+  const published = document.getElementById('pub-live').checked
+  const author    = document.getElementById('pub-author').value
+
+  const btn = document.getElementById('do-pub-btn')
+  btn.disabled = true
+  btn.innerHTML = `<span class="spinner"></span> ${genImage ? 'Generating image…' : 'Publishing…'}`
+
+  try {
+    const endpoint = genImage ? `/api/v1/publish/${postId}/full` : `/api/v1/publish/${postId}/shopify`
+    const body = genImage
+      ? { blog_id: blogId, author, published, generate_image: true }
+      : { blog_id: blogId, author, published }
+    const r = await POST(endpoint, body)
+    closeModal()
+    toast(`✅ Published! ${r.platform_url || ''}`, 'success')
+    if (S.page === 'posts') loadPosts()
+  } catch(e) {
+    toast('Publish failed: ' + e.message, 'error')
+    btn.disabled = false
+    btn.innerHTML = '🚀 Publish'
+  }
+}
+
+// ═══════════════════ KEYWORD RESEARCH ════════════════════════
+function renderResearch() {
+  document.getElementById('header-actions').innerHTML = ''
+  document.getElementById('content').innerHTML = `
+    <div class="card mb-4">
+      <div class="flex gap-3">
+        <input type="text" id="kw-q" placeholder="Enter keyword, e.g. đồng hồ cơ nam"
+          style="flex:1" onkeyup="if(event.key==='Enter')doResearch()">
+        <select id="kw-country" style="width:100px">
+          <option value="vn" selected>🇻🇳 VN</option>
+          <option value="us">🇺🇸 US</option>
+          <option value="gb">🇬🇧 GB</option>
+        </select>
+        <select id="kw-lang" style="width:110px">
+          <option value="vi" selected>Vietnamese</option>
+          <option value="en">English</option>
+        </select>
+        <button class="btn btn-primary" id="res-btn" onclick="doResearch()">🔍 Research</button>
+      </div>
+    </div>
+    <div id="res-out"></div>`
+
+  if (S.research) renderResearchResults(S.research)
+}
+
+async function doResearch() {
+  const kw = document.getElementById('kw-q').value.trim()
+  if (!kw) { toast('Enter a keyword', 'error'); return }
+
+  const btn = document.getElementById('res-btn')
+  btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Researching…`
+  document.getElementById('res-out').innerHTML =
+    `<div class="grid grid-cols-2 gap-4">${skeletons(2,'h-64')}</div>`
+
+  try {
+    const r = await POST('/api/v1/research/', {
+      keyword: kw,
+      country: document.getElementById('kw-country').value,
+      language: document.getElementById('kw-lang').value,
+    })
+    S.research = r
+    renderResearchResults(r)
+  } catch(e) { toast('Research failed: ' + e.message, 'error'); document.getElementById('res-out').innerHTML = '' }
+  finally { btn.disabled = false; btn.innerHTML = '🔍 Research' }
+}
+
+function renderResearchResults(r) {
+  document.getElementById('res-out').innerHTML = `
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div class="card">
+        <div class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+          People Also Ask (${(r.people_also_ask||[]).length})
+        </div>
+        ${(r.people_also_ask||[]).map(q => `
+          <div class="flex gap-2 py-2 border-b border-gray-50 last:border-0 text-sm">
+            <span class="text-indigo-400 shrink-0 mt-0.5">❓</span>
+            <span class="text-gray-700">${esc(q)}</span>
+          </div>`).join('') || '<div class="text-sm text-gray-400">No data</div>'}
+      </div>
+      <div class="card">
+        <div class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+          Related Searches (${(r.related_searches||[]).length})
+        </div>
+        ${(r.related_searches||[]).map(q => `
+          <div class="flex gap-2 py-2 border-b border-gray-50 last:border-0 text-sm">
+            <span class="text-green-400 shrink-0 mt-0.5">🔗</span>
+            <span class="text-gray-700">${esc(q)}</span>
+          </div>`).join('') || '<div class="text-sm text-gray-400">No data</div>'}
+      </div>
+    </div>
+
+    ${(r.top_results||[]).length ? `
+      <div class="card mb-4">
+        <div class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Top SERP Results</div>
+        <div class="space-y-3">
+          ${r.top_results.map((res, i) => `
+            <div class="flex gap-3 p-3 bg-gray-50 rounded-lg">
+              <div class="text-lg font-bold text-gray-300 w-5 shrink-0">${i+1}</div>
+              <div class="min-w-0">
+                <a href="${esc(res.url)}" target="_blank" class="text-sm font-medium text-indigo-600 hover:underline block truncate">${esc(res.title)}</a>
+                <div class="text-xs text-green-700 truncate">${esc(res.url||'')}</div>
+                <div class="text-xs text-gray-500 mt-0.5">${esc(res.snippet||'')}</div>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
+
+    <div class="flex gap-2">
+      <button class="btn btn-secondary btn-sm" onclick="useResearchForGenerate()">✍️ Use for Generate →</button>
+      <button class="btn btn-secondary btn-sm" onclick="useResearchForTopics()">🗂 Plan Topic Cluster →</button>
+    </div>
+    ${r.note ? `<div class="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 p-3 rounded-lg">⚠️ ${esc(r.note)}</div>` : ''}`
+}
+
+function useResearchForGenerate() {
+  nav('generate')
+  setTimeout(() => {
+    const el = document.getElementById('gen-kw')
+    if (el && S.research) { el.value = S.research.keyword; el.focus() }
+  }, 80)
+}
+function useResearchForTopics() {
+  nav('topics')
+  setTimeout(() => {
+    const el = document.getElementById('tp-kw')
+    if (el && S.research) { el.value = S.research.keyword; el.focus() }
+  }, 80)
+}
+
+// ═══════════════════ TOPIC CLUSTERS ══════════════════════════
+async function renderTopics() {
+  document.getElementById('header-actions').innerHTML = ''
+  document.getElementById('content').innerHTML = `
+    <div class="card mb-4">
+      <div class="text-sm font-semibold text-gray-700 mb-3">Plan New Topic Cluster</div>
+      <div class="flex gap-3">
+        <input type="text" id="tp-kw" placeholder="Seed keyword, e.g. SEO cho Shopify" style="flex:1"
+          onkeyup="if(event.key==='Enter')doTopicPlan()">
+        <select id="tp-country" style="width:100px">
+          <option value="vn" selected>🇻🇳 VN</option>
+          <option value="us">🇺🇸 US</option>
+        </select>
+        <select id="tp-lang" style="width:110px">
+          <option value="vi" selected>Vietnamese</option>
+          <option value="en">English</option>
+        </select>
+        <button class="btn btn-primary" id="tp-btn" onclick="doTopicPlan()">🗂 Plan Cluster</button>
+      </div>
+    </div>
+    <div id="tp-result"></div>
+    <div class="card mt-4">
+      <div class="text-sm font-semibold text-gray-700 mb-3">Saved Clusters</div>
+      <div id="tp-list">${skeletons(4)}</div>
+    </div>`
+
+  if (S.topicPlan) renderTopicPlanResult(S.topicPlan)
+  loadClusterList()
+}
+
+async function doTopicPlan() {
+  const kw = document.getElementById('tp-kw').value.trim()
+  if (!kw) { toast('Enter a seed keyword', 'error'); return }
+
+  const btn = document.getElementById('tp-btn')
+  btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Planning with GPT-4o…`
+
+  try {
+    const r = await POST('/api/v1/topics/plan', {
+      seed_keyword: kw,
+      country: document.getElementById('tp-country').value,
+      language: document.getElementById('tp-lang').value,
+    })
+    S.topicPlan = r
+    renderTopicPlanResult(r)
+    loadClusterList()
+    toast('✅ Topic cluster planned!', 'success')
+  } catch(e) { toast('Planning failed: ' + e.message, 'error') }
+  finally { btn.disabled = false; btn.innerHTML = '🗂 Plan Cluster' }
+}
+
+function renderTopicPlanResult(r) {
+  document.getElementById('tp-result').innerHTML = `
+    <div class="card mb-4 border-indigo-200 bg-gradient-to-br from-indigo-50 to-white">
+      <div class="font-semibold text-indigo-800 mb-4">📋 ${esc(r.cluster_name || r.seed_keyword)}</div>
+
+      <div class="mb-4">
+        <div class="text-xs font-semibold text-gray-400 uppercase mb-2">Pillar Article</div>
+        <div class="bg-white border border-indigo-100 rounded-xl p-4 flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="font-medium text-gray-800">${esc(r.pillar?.title||'—')}</div>
+            <div class="text-xs text-indigo-600 mt-1">🔑 ${esc(r.pillar?.focus_keyword||'')}</div>
+            <div class="text-xs text-gray-400 mt-1">${(r.pillar?.outline||[]).join(' · ')}</div>
+          </div>
+          <button class="btn btn-primary btn-sm shrink-0" onclick="prefillGenerate('pillar')">✍️ Generate</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="text-xs font-semibold text-gray-400 uppercase mb-2">Supporting Articles (${(r.supporting_articles||[]).length})</div>
+        <div class="space-y-2">
+          ${(r.supporting_articles||[]).map((a,i) => `
+            <div class="bg-white border border-indigo-100 rounded-xl p-3 flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-sm font-medium text-gray-800">${esc(a.title)}</div>
+                <div class="text-xs text-gray-400 mt-0.5">🔑 ${esc(a.focus_keyword)} ${a.target_question ? '· '+esc(a.target_question) : ''}</div>
+              </div>
+              <button class="btn btn-secondary btn-sm shrink-0" onclick="prefillGenerate('support_${i}')">✍️ Generate</button>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`
+}
+
+async function loadClusterList() {
+  try {
+    const list = await GET('/api/v1/topics/')
+    const el = document.getElementById('tp-list')
+    if (!el) return
+    el.innerHTML = list.length === 0
+      ? '<div class="text-sm text-gray-400 py-4">No clusters yet.</div>'
+      : list.map(c => `
+          <div class="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
+            <div>
+              <div class="text-sm font-medium text-gray-800">${esc(c.cluster_name||c.seed_keyword)}</div>
+              <div class="text-xs text-gray-400">${esc(c.seed_keyword)} · #${c.id}</div>
+            </div>
+            <span class="badge badge-gray text-xs">${esc(c.status)}</span>
+          </div>`).join('')
+  } catch(e) {
+    const el = document.getElementById('tp-list')
+    if (el) el.innerHTML = `<div class="text-sm text-red-400">Failed: ${esc(e.message)}</div>`
+  }
+}
+
+function prefillGenerate(key) {
+  let article
+  if (key === 'pillar') article = S.topicPlan?.pillar
+  else if (key.startsWith('support_')) article = S.topicPlan?.supporting_articles?.[parseInt(key.split('_')[1])]
+  if (!article) return
+  nav('generate')
+  setTimeout(() => {
+    const t = document.getElementById('gen-title')
+    const k = document.getElementById('gen-kw')
+    if (t) t.value = article.title || ''
+    if (k) k.value = article.focus_keyword || ''
+    if (article.outline?.length) { outlineItems = [...article.outline]; renderOutline() }
+  }, 80)
+}
+
+// ═══════════════════ GENERATE ARTICLE ════════════════════════
+function renderGenerate() {
+  document.getElementById('header-actions').innerHTML = ''
+  document.getElementById('content').innerHTML = `
+    <div class="grid gap-6" style="grid-template-columns:1fr 320px">
+      <!-- Left: form -->
+      <div class="space-y-4">
+        <div class="card">
+          <div class="text-sm font-semibold text-gray-700 mb-4">Article Details</div>
+          <div class="space-y-3">
+            <div>
+              <label>Article Title</label>
+              <input type="text" id="gen-title" placeholder="e.g. Top 10 Đồng Hồ Cơ Nam 2025">
+            </div>
+            <div>
+              <label>Focus Keyword</label>
+              <input type="text" id="gen-kw" placeholder="e.g. đồng hồ cơ nam">
+            </div>
+            <div>
+              <label>Outline (one H2 section per line)</label>
+              <div id="outline-list" class="space-y-2"></div>
+              <button class="btn btn-secondary btn-sm mt-2" onclick="addOutlineItem()">+ Add Section</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="text-sm font-semibold text-gray-700 mb-4">Options</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label>Language</label>
+              <select id="gen-lang"><option value="vi">Vietnamese</option><option value="en">English</option></select>
+            </div>
+            <div>
+              <label>Tone</label>
+              <select id="gen-tone">
+                <option value="professional">Professional</option>
+                <option value="casual">Casual</option>
+                <option value="friendly">Friendly</option>
+                <option value="authoritative">Authoritative</option>
+              </select>
+            </div>
+            <div>
+              <label>Word Count</label>
+              <input type="number" id="gen-words" value="1500" min="800" max="5000">
+            </div>
+            <div>
+              <label>Blog Channel</label>
+              <select id="gen-channel">
+                <option value="">— None —</option>
+                ${S.channels.map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        </div>
+        <button id="gen-btn" class="btn btn-primary w-full" style="width:100%;justify-content:center" onclick="doGenerate()">
+          ✍️ Generate Article with GPT-4o
+        </button>
+      </div>
+
+      <!-- Right: result panel -->
+      <div id="gen-result">
+        <div class="card h-full flex items-center justify-center text-center min-h-64">
+          <div>
+            <div class="text-4xl mb-3">✍️</div>
+            <div class="text-sm text-gray-400">Fill in the form<br>and click Generate</div>
+          </div>
+        </div>
+      </div>
+    </div>`
+
+  renderOutline()
+  if (S.generated) showGenerateResult(S.generated)
+}
+
+function renderOutline() {
+  const el = document.getElementById('outline-list')
+  if (!el) return
+  el.innerHTML = outlineItems.map((item, i) => `
+    <div class="flex gap-2">
+      <input type="text" value="${esc(item)}" placeholder="H2 section…" oninput="outlineItems[${i}]=this.value">
+      ${outlineItems.length > 1
+        ? `<button class="btn btn-secondary btn-sm shrink-0" onclick="removeOutlineItem(${i})" style="min-width:36px">✕</button>`
+        : ''}
+    </div>`).join('')
+}
+function addOutlineItem()        { outlineItems.push(''); renderOutline() }
+function removeOutlineItem(i)    { outlineItems.splice(i,1); renderOutline() }
+
+async function doGenerate() {
+  const title   = document.getElementById('gen-title').value.trim()
+  const keyword = document.getElementById('gen-kw').value.trim()
+  const outline = outlineItems.filter(s => s.trim())
+
+  if (!title)          { toast('Enter article title', 'error'); return }
+  if (!keyword)        { toast('Enter focus keyword', 'error'); return }
+  if (!outline.length) { toast('Add at least one outline section', 'error'); return }
+
+  const btn = document.getElementById('gen-btn')
+  btn.disabled = true
+  btn.innerHTML = `<span class="spinner"></span> Generating with GPT-4o…`
+
+  document.getElementById('gen-result').innerHTML = `
+    <div class="card flex items-center justify-center text-center" style="min-height:300px">
+      <div>
+        <div class="spinner-dark mx-auto mb-4"></div>
+        <div class="text-sm text-gray-600 font-medium">GPT-4o is writing your article…</div>
+        <div class="text-xs text-gray-400 mt-1">Typically 20–40 seconds</div>
+      </div>
+    </div>`
+
+  try {
+    const channelId = document.getElementById('gen-channel').value
+    const r = await POST('/api/v1/generate/article', {
+      title, focus_keyword: keyword, outline,
+      language:       document.getElementById('gen-lang').value,
+      tone:           document.getElementById('gen-tone').value,
+      word_count:     parseInt(document.getElementById('gen-words').value),
+      blog_channel_id: channelId ? parseInt(channelId) : null,
+    })
+    S.generated = r
+    showGenerateResult(r)
+    toast('✅ Article generated!', 'success')
+  } catch(e) {
+    document.getElementById('gen-result').innerHTML =
+      `<div class="card"><div class="text-red-500 text-sm">Error: ${esc(e.message)}</div></div>`
+    toast('Generation failed: ' + e.message, 'error')
+  } finally {
+    btn.disabled = false
+    btn.innerHTML = '✍️ Generate Article with GPT-4o'
+  }
+}
+
+function showGenerateResult(r) {
+  const el = document.getElementById('gen-result')
+  if (!el) return
+  el.innerHTML = `
+    <div class="card space-y-3">
+      <div class="font-semibold text-gray-800 text-sm leading-snug">${esc(r.title)}</div>
+      <div class="flex gap-1 flex-wrap">${statusBadge(r.status)} ${sourceBadge(r.source)}</div>
+
+      <div class="text-xs bg-gray-50 rounded-lg p-3 space-y-1.5">
+        <div><span class="text-gray-400">SEO Title:</span> ${esc(r.seo_title||'—')}</div>
+        <div><span class="text-gray-400">Meta desc:</span> ${esc(r.seo_description||'—')}</div>
+        <div><span class="text-gray-400">Tags:</span> ${(r.tags||[]).join(', ')||'—'}</div>
+        <div><span class="text-gray-400">Internal links:</span> ${r.internal_links_count||0}</div>
+        <div><span class="text-gray-400">Tokens in/out:</span> ${r.usage?.input_tokens||0} / ${r.usage?.output_tokens||0}</div>
+      </div>
+
+      <div class="text-xs bg-purple-50 border border-purple-100 rounded-lg p-3">
+        <div class="text-purple-700 font-medium mb-1">🎨 DALL·E Image Prompt</div>
+        <div class="text-gray-600 leading-relaxed">${esc(r.image_prompt||'—')}</div>
+      </div>
+
+      <div class="text-xs text-gray-400 bg-gray-50 rounded-lg p-2" style="max-height:80px;overflow:hidden">
+        ${esc((r.content_preview||'').substring(0,240))}…
+      </div>
+
+      <div class="space-y-2 pt-1">
+        <button class="btn btn-secondary btn-sm w-full" style="width:100%;justify-content:center" onclick="viewPost(${r.id})">
+          👁 Preview Full Article
+        </button>
+        <button class="btn btn-success btn-sm w-full" style="width:100%;justify-content:center" onclick="openPublishModal(${r.id},'${esc(r.title)}')">
+          🚀 Publish to Shopify
+        </button>
+      </div>
+    </div>`
+}
+
+// ═══════════════════════════ INIT ════════════════════════════
+async function init() {
+  try { S.channels = await GET('/api/v1/blogs/channels') } catch { S.channels = [] }
+  nav('dashboard')
+}
+init()
+</script>
+</body>
+</html>

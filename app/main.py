@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.content_routes import generate_router, research_router, topics_router
 from app.api.init_routes import blog_router, router as init_router
@@ -43,6 +45,13 @@ app.include_router(research_router)
 app.include_router(topics_router)
 app.include_router(generate_router)
 app.include_router(publish_router)
+
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def ui():
+    return FileResponse("app/static/index.html")
 
 
 @app.get("/health")
