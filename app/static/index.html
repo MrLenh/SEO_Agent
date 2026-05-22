@@ -239,8 +239,9 @@ function loading(el, html) { if (el) el.innerHTML = html }
 
 // ═══════════════════════ DASHBOARD ═══════════════════════════
 async function renderDashboard() {
+  const isAdmin = S.user?.role === 'admin'
   document.getElementById('header-actions').innerHTML =
-    `<button class="btn btn-secondary btn-sm" onclick="openConnectModal()">🔗 Connect Shopify</button>
+    `${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="openConnectModal()">🔗 Connect Shopify</button>` : ''}
      <button class="btn btn-primary btn-sm" id="sync-btn" onclick="syncShopify()">🔄 Sync</button>`
 
   document.getElementById('content').innerHTML = `
@@ -251,9 +252,11 @@ async function renderDashboard() {
       <div id="recent-posts">${skeletons(5)}</div>
     </div>`
 
-  // Load Shopify connection status
+  // Load Shopify connection status (admin sees all stores, member sees only their accessible ones)
   try {
-    const stores = await GET('/auth/shopify/status')
+    const stores = isAdmin
+      ? (await GET('/auth/shopify/status')).map(s => ({ shop: s.shop, scope: s.scope }))
+      : (await GET('/api/v1/users/stores/accessible')).map(s => ({ shop: s.shop_domain, scope: (s.scopes||[]).join(',') }))
     const bar = document.getElementById('shopify-status-bar')
     if (bar) {
       if (stores.length > 0) {
@@ -262,11 +265,16 @@ async function renderDashboard() {
             <span>✅</span>
             <span><strong>${esc(s.shop)}</strong> connected · scopes: ${esc(s.scope||'—')}</span>
           </div>`).join('')
-      } else {
+      } else if (isAdmin) {
         bar.innerHTML = `
           <div class="flex items-center justify-between text-sm bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-2">
             <span class="text-amber-800">⚠️ No Shopify store connected yet</span>
             <button class="btn btn-primary btn-sm" onclick="openConnectModal()">🔗 Connect Now</button>
+          </div>`
+      } else {
+        bar.innerHTML = `
+          <div class="flex items-center text-sm bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-2">
+            <span class="text-amber-800">⚠️ No store assigned to you yet. Contact an admin.</span>
           </div>`
       }
     }
@@ -1807,6 +1815,10 @@ function prefillRankingCheck(keyword) {
 
 // ═══════════════════ SHOPIFY CONNECT ═════════════════════════
 async function openConnectModal() {
+  if (S.user?.role !== 'admin') {
+    toast('Only admins can connect Shopify stores', 'error')
+    return
+  }
   // Load saved OAuth settings before rendering modal
   let oauthCfg = { api_key: '', api_secret: '', app_url: window.location.origin }
   try { oauthCfg = await GET('/api/v1/settings/oauth') } catch {}
@@ -1912,7 +1924,13 @@ async function doConnect() {
       return
     }
     S.shopDomain = shop
-    window.location.href = `/auth/shopify?shop=${encodeURIComponent(shop)}`
+    try {
+      const { install_url } = await POST('/auth/shopify/install-url', { shop })
+      window.location.href = install_url
+    } catch(e) {
+      toast('Failed to start install: ' + e.message, 'error')
+      btn.disabled = false; btn.innerHTML = '🔗 Connect Store'
+    }
     return
   }
   // Custom App Token

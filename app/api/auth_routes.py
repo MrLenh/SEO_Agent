@@ -3,11 +3,14 @@ Shopify OAuth 2.0 flow for Partner Apps.
 Legacy Custom Apps are no longer creatable as of Jan 1, 2026.
 
 Flow:
-  1. User visits GET /auth/shopify?shop=mystore.myshopify.com
-  2. App redirects → Shopify authorization page
+  1. Admin POSTs /auth/shopify/install-url {shop} → server returns install_url
+  2. Frontend redirects the browser to install_url (Shopify authorization page)
   3. Merchant approves → Shopify redirects to GET /auth/shopify/callback
   4. App exchanges code for access_token, stores in DB
   5. All subsequent API calls use token from DB
+
+All connect endpoints (install-url, connect-token, status, debug-url)
+require admin auth. Only the callback is public (validated via HMAC).
 """
 import hashlib
 import hmac as hmac_mod
@@ -16,16 +19,27 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
 from app.models.shopify_store import ShopifyStore
+from app.services.auth_service import require_admin
+from pydantic import BaseModel as _Base
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
 SCOPES = "read_content,write_content"
+
+
+class _InstallUrlBody(_Base):
+    shop: str
+
+
+class _ConnectTokenBody(_Base):
+    shop_domain: str
+    access_token: str
 
 
 def _verify_shopify_hmac(params: dict, secret: str) -> bool:
@@ -67,36 +81,32 @@ def _get_oauth_config(db: Session) -> dict:
     }
 
 
-# ── Step 1: Start OAuth ───────────────────────────────────────────────────────
+# ── Step 1: Build install URL (admin only) ───────────────────────────────────
 
-@auth_router.get("/shopify", include_in_schema=False)
-async def shopify_oauth_start(
-    shop: str = Query(..., description="mystore.myshopify.com"),
+@auth_router.post("/shopify/install-url")
+def shopify_install_url(
+    body: _InstallUrlBody,
+    admin=Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    """
+    Admin-only: build the Shopify OAuth install URL for `shop`.
+    Frontend then redirects the browser to the returned `install_url`.
+    Replaces the old GET /auth/shopify so only admins can initiate installs.
+    """
+    shop = body.shop.strip().lower()
+    if not shop.endswith(".myshopify.com"):
+        raise HTTPException(422, "shop must end with .myshopify.com")
+
     cfg = _get_oauth_config(db)
-    missing = []
-    if not cfg["api_key"]:
-        missing.append("SHOPIFY_API_KEY")
-    if not cfg["app_url"]:
-        missing.append("APP_URL")
+    missing = [k for k, v in (("SHOPIFY_API_KEY", cfg["api_key"]),
+                              ("APP_URL", cfg["app_url"])) if not v]
     if missing:
-        return HTMLResponse(f"""<!DOCTYPE html>
-<html><head><title>Config Error</title><script src="https://cdn.tailwindcss.com"></script></head>
-<body class="bg-gray-50 flex items-center justify-center min-h-screen">
-<div class="bg-white rounded-2xl shadow-lg p-10 text-center max-w-md">
-  <div class="text-5xl mb-4">⚠️</div>
-  <h2 class="text-xl font-bold text-red-700 mb-3">Missing OAuth Configuration</h2>
-  <div class="text-left bg-red-50 rounded-lg p-4 mb-6 text-sm font-mono">
-    {"<br>".join(f"❌ {v}" for v in missing)}
-  </div>
-  <p class="text-gray-500 text-sm mb-4">Set these in Dashboard → Connect Shopify → OAuth tab, or Railway → Variables.</p>
-  <a href="/" class="inline-block px-5 py-2 bg-indigo-600 text-white rounded-xl">← Back</a>
-</div></body></html>""", status_code=200)
+        raise HTTPException(422, f"Missing OAuth config: {', '.join(missing)}")
 
     base_url = cfg["app_url"].strip().rstrip("/")
     redirect_uri = f"{base_url}/auth/shopify/callback"
-    url = (
+    install_url = (
         f"https://{shop}/admin/oauth/authorize?"
         + urlencode({
             "client_id": cfg["api_key"],
@@ -104,7 +114,7 @@ async def shopify_oauth_start(
             "redirect_uri": redirect_uri,
         })
     )
-    return RedirectResponse(url)
+    return {"install_url": install_url, "redirect_uri": redirect_uri}
 
 
 # ── Step 2: OAuth callback ────────────────────────────────────────────────────
@@ -180,7 +190,10 @@ async def shopify_oauth_callback(
 # ── Debug: show exact OAuth URL ──────────────────────────────────────────────
 
 @auth_router.get("/shopify/debug-url", include_in_schema=False)
-def shopify_debug_url(shop: str = Query("example.myshopify.com")):
+def shopify_debug_url(
+    shop: str = Query("example.myshopify.com"),
+    admin=Depends(require_admin),
+):
     """Show the exact OAuth URL + redirect_uri that will be sent to Shopify."""
     base_url = settings.APP_URL.strip().rstrip("/")
     redirect_uri = f"{base_url}/auth/shopify/callback"
@@ -205,15 +218,12 @@ def shopify_debug_url(shop: str = Query("example.myshopify.com")):
 
 # ── Manual token connect (Custom App) ────────────────────────────────────────
 
-from pydantic import BaseModel as _Base
-
-class _ConnectTokenBody(_Base):
-    shop_domain: str
-    access_token: str
-
-
 @auth_router.post("/shopify/connect-token")
-def shopify_connect_token(body: _ConnectTokenBody, db: Session = Depends(get_db)):
+def shopify_connect_token(
+    body: _ConnectTokenBody,
+    admin=Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """
     Save a Shopify Custom App token directly — no OAuth needed.
     Use this when you created a Custom App in Shopify Admin and have the token.
@@ -238,8 +248,9 @@ def shopify_connect_token(body: _ConnectTokenBody, db: Session = Depends(get_db)
 # ── Status endpoint ───────────────────────────────────────────────────────────
 
 @auth_router.get("/shopify/status")
-def shopify_status(db: Session = Depends(get_db)):
-    """List all connected Shopify stores."""
+def shopify_status(admin=Depends(require_admin), db: Session = Depends(get_db)):
+    """List all connected Shopify stores. Admin only — non-admin users
+    should use GET /api/v1/users/stores/accessible."""
     stores = db.query(ShopifyStore).all()
     return [
         {
