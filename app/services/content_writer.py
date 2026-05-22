@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-import anthropic
+from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -16,7 +16,7 @@ from app.models.blog_post import BlogPost, Platform, PostStatus
 
 class ContentWriter:
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
     # ── Internal link helpers ─────────────────────────────────────────────────
 
@@ -147,14 +147,16 @@ Respond in this exact format:
             external_refs, internal_posts, language, tone, word_count,
         )
 
-        message = self.client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
+        message = self.client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
             max_tokens=5000,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
         )
 
-        raw = message.content[0].text
+        raw = message.choices[0].message.content
 
         # Parse response
         article_match = re.search(r"<article>(.*?)</article>", raw, re.DOTALL)
@@ -180,8 +182,8 @@ Respond in this exact format:
             "image_prompt": meta.get("image_prompt", f"Professional blog banner about {focus_keyword}"),
             "internal_links": internal_links_used,
             "usage": {
-                "input_tokens": message.usage.input_tokens,
-                "output_tokens": message.usage.output_tokens,
+                "input_tokens": message.usage.prompt_tokens,
+                "output_tokens": message.usage.completion_tokens,
             },
         }
 
@@ -210,6 +212,7 @@ Respond in this exact format:
             seo_description=result["seo_description"],
             focus_keyword=focus_keyword,
             tags=result["tags"],
+            image_prompt=result.get("image_prompt"),
             internal_links=result["internal_links"],
             status=PostStatus.DRAFT,
             source="generated",

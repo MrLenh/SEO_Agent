@@ -16,9 +16,8 @@ class Settings(BaseSettings):
     WC_CONSUMER_SECRET: str = ""
 
     # AI
-    ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-opus-4-7"
     OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o"
 
     # SEO
     SERPER_API_KEY: str = ""

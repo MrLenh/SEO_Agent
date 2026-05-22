@@ -59,6 +59,7 @@ class BlogPost(Base):
     seo_title = Column(Text)
     seo_description = Column(Text)
     focus_keyword = Column(String(500))
+    image_prompt = Column(Text)          # DALL-E prompt stored at generation time
 
     # Internal links inserted (list of target post IDs)
     internal_links = Column(JSON, default=list)

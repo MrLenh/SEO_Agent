@@ -1,12 +1,12 @@
 """
-Topic cluster planner powered by Claude.
+Topic cluster planner powered by OpenAI.
 Turns keyword research data into a pillar + supporting article plan.
 """
 import json
 import re
 from datetime import datetime
 
-import anthropic
+from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -16,7 +16,7 @@ from app.services.keyword_analyzer import KeywordAnalyzer
 
 class TopicPlanner:
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
         self.analyzer = KeywordAnalyzer()
 
     def _build_prompt(self, keyword: str, paa: list[str], related: list[str]) -> str:
@@ -55,10 +55,9 @@ Return ONLY valid JSON (no markdown, no explanation):
 Generate 5-7 supporting articles targeting the PAA questions and related searches."""
 
     def _parse_cluster(self, text: str) -> dict:
-        """Extract JSON from Claude response."""
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if not match:
-            raise ValueError("No JSON found in Claude response")
+            raise ValueError("No JSON found in response")
         return json.loads(match.group())
 
     async def plan(
@@ -72,10 +71,11 @@ Generate 5-7 supporting articles targeting the PAA questions and related searche
         # 1. Keyword research
         research = await self.analyzer.research(seed_keyword, country, language)
 
-        # 2. Claude generates cluster plan
-        message = self.client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
+        # 2. OpenAI generates cluster plan (JSON mode for reliable parsing)
+        message = self.client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
             max_tokens=2500,
+            response_format={"type": "json_object"},
             messages=[
                 {
                     "role": "user",
@@ -88,7 +88,7 @@ Generate 5-7 supporting articles targeting the PAA questions and related searche
             ],
         )
 
-        cluster_data = self._parse_cluster(message.content[0].text)
+        cluster_data = self._parse_cluster(message.choices[0].message.content)
         cluster_data["seed_keyword"] = seed_keyword
         cluster_data["research"] = research
 
