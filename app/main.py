@@ -215,5 +215,7 @@ def debug_config():
         "shopify_api_version":  settings.SHOPIFY_API_VERSION,
         "openai_api_key":       _set(settings.OPENAI_API_KEY),
         "serper_api_key":       _set(settings.SERPER_API_KEY),
+        "google_client_id":     _set(settings.GOOGLE_CLIENT_ID),
+        "google_client_secret": _set(settings.GOOGLE_CLIENT_SECRET),
         "database_url":         settings.DATABASE_URL[:30] + "..." if settings.DATABASE_URL else "(not set)",
     }

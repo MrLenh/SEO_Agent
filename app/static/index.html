@@ -1386,36 +1386,24 @@ function renderGscTab() {
 }
 
 async function initGscTab() {
-  const status = await GET('/api/v1/audit/gsc/status').catch(() => ({ configured: false }))
+  const shopParam = S.currentShop ? `&shop_domain=${encodeURIComponent(S.currentShop)}` : ''
+  const status = await GET(`/api/v1/audit/gsc/status${S.currentShop ? '?shop_domain='+encodeURIComponent(S.currentShop) : ''}`).catch(() => ({ configured: false }))
   const el = document.getElementById('gsc-body')
   if (!el) return
 
   if (!status.configured) {
     el.innerHTML = `
       <div class="bg-amber-50 border border-amber-200 rounded-xl p-6 space-y-4">
-        <h3 class="font-semibold text-amber-800">📋 Setup Required</h3>
-        <p class="text-sm text-amber-700">Connect Google Search Console to see real traffic data for your store.</p>
-        <div class="space-y-3 text-sm">
-          <div class="bg-white rounded-lg p-4 border border-amber-100 space-y-2">
-            <div class="font-medium text-gray-700">Step 1 — Enable Search Console API</div>
-            <div class="text-gray-500">Go to <strong>console.cloud.google.com</strong> → APIs & Services → Enable <strong>Google Search Console API</strong></div>
-          </div>
-          <div class="bg-white rounded-lg p-4 border border-amber-100 space-y-2">
-            <div class="font-medium text-gray-700">Step 2 — Create Service Account</div>
-            <div class="text-gray-500">IAM & Admin → Service Accounts → Create → Download <strong>JSON key</strong></div>
-          </div>
-          <div class="bg-white rounded-lg p-4 border border-amber-100 space-y-2">
-            <div class="font-medium text-gray-700">Step 3 — Add to Search Console</div>
-            <div class="text-gray-500">search.google.com/search-console → Settings → Users and permissions → Add the service account email as <strong>Restricted</strong></div>
-          </div>
-          <div class="bg-white rounded-lg p-4 border border-amber-100 space-y-2">
-            <div class="font-medium text-gray-700">Step 4 — Set Railway Env Vars</div>
-            <div class="font-mono text-xs bg-gray-50 p-2 rounded space-y-1">
-              <div>GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}</div>
-              <div>GSC_SITE_URL=https://gingerglow.myshopify.com/</div>
-            </div>
-            <div class="text-gray-500 text-xs">Paste the full JSON content of the downloaded key file into GOOGLE_SERVICE_ACCOUNT_JSON</div>
-          </div>
+        <h3 class="font-semibold text-amber-800">📋 GSC Not Connected</h3>
+        <p class="text-sm text-amber-700">Connect Google Search Console for this brand to see real traffic data.</p>
+        <button class="btn btn-primary btn-sm" onclick="nav('brand')">🔗 Go to Brand Profile → Connect GSC</button>
+        <div class="text-xs text-gray-500 space-y-1 border-t pt-3">
+          <div class="font-medium text-gray-600">Recommended: OAuth2 (works in 30 seconds)</div>
+          <div>1. Go to <strong>Brand Profile</strong> → enter your GSC Site URL → click <strong>Connect via Google OAuth</strong></div>
+          <div>2. Sign in with the Google account that owns your GSC property</div>
+          <div>3. Done — data loads automatically</div>
+          <div class="mt-2 font-medium text-gray-600">Why service account "email not found" error?</div>
+          <div>GSC does NOT support email invitations for service accounts. Use OAuth above, or add the service account email directly (not invite) in GSC → Settings → Users and Permissions → <strong>Add user</strong>.</div>
         </div>
         ${status.error ? `<div class="text-xs text-red-600 bg-red-50 p-2 rounded">Error: ${esc(status.error)}</div>` : ''}
       </div>`
@@ -1441,10 +1429,10 @@ async function loadGscData() {
 
   try {
     const [overview, pages, queries, opps] = await Promise.all([
-      GET(`/api/v1/audit/gsc/overview?days=${S.gscDays}`),
-      GET(`/api/v1/audit/gsc/pages?days=${S.gscDays}&limit=20`),
-      GET(`/api/v1/audit/gsc/queries?days=${S.gscDays}&limit=20`),
-      GET(`/api/v1/audit/gsc/opportunities?days=${S.gscDays}`),
+      GET(`/api/v1/audit/gsc/overview?days=${S.gscDays}${shopParam}`),
+      GET(`/api/v1/audit/gsc/pages?days=${S.gscDays}&limit=20${shopParam}`),
+      GET(`/api/v1/audit/gsc/queries?days=${S.gscDays}&limit=20${shopParam}`),
+      GET(`/api/v1/audit/gsc/opportunities?days=${S.gscDays}${shopParam}`),
     ])
     renderGscData(overview, pages, queries, opps)
   } catch(e) {
@@ -1760,6 +1748,38 @@ async function renderBrand() {
           </div>
         </div>
       </div>
+
+      <!-- Google Search Console -->
+      <div class="card">
+        <div class="font-semibold text-gray-800 mb-1">📊 Google Search Console</div>
+        <p class="text-sm text-gray-500 mb-4">Connect GSC so SEO audit data is scoped to this brand's website.</p>
+        <div class="space-y-3">
+          <div>
+            <label>GSC Site URL <span class="text-gray-400 font-normal text-xs">— exact URL registered in GSC (include trailing slash)</span></label>
+            <input type="url" id="bp-gsc-url" value="${esc(bp.gsc_site_url||'')}" placeholder="https://example.myshopify.com/">
+          </div>
+          <div class="flex items-center gap-3 flex-wrap">
+            ${bp.gsc_connected
+              ? `<span class="badge badge-green">✅ Connected</span>
+                 <button class="btn btn-secondary btn-sm" onclick="gscDisconnect()">Disconnect</button>`
+              : `<button class="btn btn-primary btn-sm" onclick="gscConnect()">🔗 Connect via Google OAuth</button>
+                 <span class="text-xs text-gray-400">Opens Google sign-in in a new tab</span>`}
+          </div>
+          <div class="text-xs text-amber-700 bg-amber-50 rounded-lg p-3 space-y-1">
+            <div class="font-medium">⚠️ Why service account email fails ("email not found")</div>
+            <div>Google Search Console does NOT support email invitations for service accounts. Use OAuth above instead — it takes 30 seconds and always works.</div>
+            <div class="mt-1 font-medium">If you still want service account:</div>
+            <ol class="list-decimal list-inside space-y-0.5">
+              <li>Go to GSC → [your property] → Settings → Users and Permissions</li>
+              <li>Click <strong>Add user</strong> (not "Invite user")</li>
+              <li>Paste the <code>client_email</code> from your service account JSON</li>
+              <li>Set permission to <strong>Full</strong> and click Save</li>
+              <li>Set env vars <code>GOOGLE_SERVICE_ACCOUNT_JSON</code> + <code>GSC_SITE_URL</code> on Railway</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+
       <div class="card bg-blue-50 border border-blue-100">
         <div class="text-sm font-medium text-blue-800 mb-1">How it works</div>
         <ul class="text-xs text-blue-700 space-y-1 list-disc list-inside">
@@ -1767,6 +1787,7 @@ async function renderBrand() {
           <li>Store-specific profile takes priority over global profile</li>
           <li>Tone of Voice overrides the per-article tone selector</li>
           <li>Output Requirements give GPT-4o structural and formatting rules</li>
+          <li>GSC connection scopes Search Console data to this brand's site</li>
         </ul>
       </div>
     </div>`
@@ -1781,11 +1802,35 @@ async function saveBrand() {
     brand_style: document.getElementById('bp-style').value.trim(),
     tone_of_voice: document.getElementById('bp-tone').value.trim(),
     output_requirements: document.getElementById('bp-output').value.trim(),
+    gsc_site_url: document.getElementById('bp-gsc-url')?.value.trim() || null,
   }
   try {
     S.brandProfile = await PUT('/api/v1/settings/brand', body)
     toast('Brand profile saved!', 'success')
   } catch(e) { toast('Save failed: ' + e.message, 'error') }
+}
+
+async function gscConnect() {
+  const shop = S.currentShop
+  // Save GSC site URL first
+  const siteUrl = document.getElementById('bp-gsc-url')?.value.trim()
+  if (siteUrl) await saveBrand()
+  try {
+    const r = await GET(`/api/v1/settings/gsc/connect${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
+    window.open(r.auth_url, '_blank', 'width=600,height=700')
+    toast('Complete Google sign-in in the new window, then refresh this page', 'info')
+  } catch(e) { toast('Connect failed: ' + e.message, 'error') }
+}
+
+async function gscDisconnect() {
+  const shop = S.currentShop
+  if (!confirm('Disconnect Google Search Console for this brand?')) return
+  try {
+    await api('DELETE', `/api/v1/settings/gsc/disconnect${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
+    S.brandProfile = null
+    renderBrand()
+    toast('GSC disconnected', 'success')
+  } catch(e) { toast('Disconnect failed: ' + e.message, 'error') }
 }
 
 // ══════════════════════ USER MANAGEMENT ══════════════════════

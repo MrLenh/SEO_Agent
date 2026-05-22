@@ -112,72 +112,76 @@ Be specific and actionable. Base recommendations on actual ranking data."""
 
 # ── Google Search Console ─────────────────────────────────────────────────────
 
+def _gsc(shop_domain: Optional[str], db):
+    from app.services.gsc_client import get_client_for_brand
+    client = get_client_for_brand(shop_domain, db)
+    if not client:
+        raise HTTPException(422, "GSC not configured for this brand. Connect via Brand Profile → Search Console.")
+    return client
+
+
 @audit_router.get("/gsc/status")
-def gsc_status():
-    """Check if GSC is configured and credentials are valid."""
-    from app.services import gsc_client as gsc
-    if not gsc.is_configured():
+def gsc_status(shop_domain: Optional[str] = None, db: Session = Depends(get_db)):
+    from app.services.gsc_client import get_client_for_brand
+    client = get_client_for_brand(shop_domain, db)
+    if not client:
         return {
             "configured": False,
-            "message": "Set GOOGLE_SERVICE_ACCOUNT_JSON and GSC_SITE_URL in Railway env vars.",
+            "message": "Connect Google Search Console in Brand Profile settings.",
         }
     try:
-        gsc._get_credentials()
-        return {"configured": True, "site_url": settings.GSC_SITE_URL}
+        client._headers()   # test credentials
+        return {"configured": True, "site_url": client.site_url}
     except Exception as e:
         return {"configured": False, "error": str(e)}
 
 
 @audit_router.get("/gsc/overview")
-def gsc_overview(days: int = 28):
-    from app.services import gsc_client as gsc
-    if not gsc.is_configured():
-        raise HTTPException(422, "GSC not configured")
+def gsc_overview(days: int = 28, shop_domain: Optional[str] = None, db: Session = Depends(get_db)):
     try:
-        return gsc.get_overview(days)
+        return _gsc(shop_domain, db).get_overview(days)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(502, f"GSC API error: {e}")
 
 
 @audit_router.get("/gsc/pages")
-def gsc_top_pages(days: int = 28, limit: int = 25):
-    from app.services import gsc_client as gsc
-    if not gsc.is_configured():
-        raise HTTPException(422, "GSC not configured")
+def gsc_top_pages(days: int = 28, limit: int = 25, shop_domain: Optional[str] = None, db: Session = Depends(get_db)):
     try:
-        return gsc.get_top_pages(days, limit)
+        return _gsc(shop_domain, db).get_top_pages(days, limit)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(502, f"GSC API error: {e}")
 
 
 @audit_router.get("/gsc/queries")
-def gsc_top_queries(days: int = 28, limit: int = 25, page: Optional[str] = None):
-    from app.services import gsc_client as gsc
-    if not gsc.is_configured():
-        raise HTTPException(422, "GSC not configured")
+def gsc_top_queries(days: int = 28, limit: int = 25, page: Optional[str] = None,
+                    shop_domain: Optional[str] = None, db: Session = Depends(get_db)):
     try:
-        return gsc.get_top_queries(days, limit, page)
+        return _gsc(shop_domain, db).get_top_queries(days, limit, page)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(502, f"GSC API error: {e}")
 
 
 @audit_router.get("/gsc/opportunities")
-def gsc_opportunities(days: int = 28):
-    from app.services import gsc_client as gsc
-    if not gsc.is_configured():
-        raise HTTPException(422, "GSC not configured")
+def gsc_opportunities(days: int = 28, shop_domain: Optional[str] = None, db: Session = Depends(get_db)):
     try:
-        return gsc.get_opportunities(days)
+        return _gsc(shop_domain, db).get_opportunities(days)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(502, f"GSC API error: {e}")
 
 
 @audit_router.get("/gsc/sparkline")
-def gsc_sparkline(days: int = 90):
-    from app.services import gsc_client as gsc
-    if not gsc.is_configured():
-        raise HTTPException(422, "GSC not configured")
+def gsc_sparkline(days: int = 90, shop_domain: Optional[str] = None, db: Session = Depends(get_db)):
     try:
-        return gsc.get_sparkline(days)
+        return _gsc(shop_domain, db).get_sparkline(days)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(502, f"GSC API error: {e}")
