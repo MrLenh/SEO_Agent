@@ -12,8 +12,10 @@ from app.api.auth_routes import auth_router
 from app.api.content_routes import generate_router, research_router, topics_router
 from app.api.init_routes import blog_router, router as init_router
 from app.api.publish_routes import publish_router
+from app.api.user_routes import user_router
 from app.database import create_tables, get_db
-from app.models import shopify_store as _  # ensure table is registered
+from app.models import shopify_store as _   # ensure table is registered
+from app.models import user as _u           # ensure user tables are registered
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(user_router)
 app.include_router(audit_router)
 app.include_router(auth_router)
 app.include_router(init_router)
