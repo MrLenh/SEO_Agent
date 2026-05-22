@@ -120,6 +120,17 @@ def _gsc(shop_domain: Optional[str], db):
     return client
 
 
+@audit_router.get("/gsc/sites")
+def gsc_list_sites(shop_domain: Optional[str] = None, db: Session = Depends(get_db)):
+    """List all GSC properties accessible with the current credentials."""
+    try:
+        return _gsc(shop_domain, db).list_sites()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"GSC API error: {e}")
+
+
 @audit_router.get("/gsc/status")
 def gsc_status(shop_domain: Optional[str] = None, db: Session = Depends(get_db)):
     from app.services.gsc_client import get_client_for_brand

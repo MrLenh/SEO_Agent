@@ -77,6 +77,16 @@ class GscClient:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    def list_sites(self) -> list:
+        """Return all GSC properties the authenticated account can access."""
+        url = f"{_GSC_BASE}/sites"
+        resp = httpx.get(url, headers=self._headers(), timeout=15.0)
+        resp.raise_for_status()
+        return [
+            {"site_url": s["siteUrl"], "permission": s.get("permissionLevel", "")}
+            for s in resp.json().get("siteEntry", [])
+        ]
+
     def get_overview(self, days: int = 28) -> dict:
         start, end = self._date_range(days)
         data = self._query({"startDate": start, "endDate": end, "dimensions": []})
