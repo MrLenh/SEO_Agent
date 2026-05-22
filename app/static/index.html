@@ -420,7 +420,7 @@ async function viewPost(id) {
         <div><span class="text-gray-400">Tags:</span> ${(p.tags||[]).join(', ')||'—'}</div>
       </div>
       <div class="border border-gray-200 rounded-xl overflow-hidden">
-        <iframe id="preview-frame" class="w-full" style="height:380px" frameborder="0" sandbox="allow-same-origin"></iframe>
+        <iframe id="preview-frame" class="w-full" style="height:380px" frameborder="0" sandbox="allow-same-origin allow-scripts"></iframe>
       </div>`
 
     const iframe = document.getElementById('preview-frame')
@@ -714,7 +714,7 @@ async function loadClusterList() {
 function prefillGenerate(key) {
   let article
   if (key === 'pillar') article = S.topicPlan?.pillar
-  else if (key.startsWith('support_')) article = S.topicPlan?.supporting_articles?.[parseInt(key.split('_')[1])]
+  else if (typeof key === 'string' && key.startsWith('support_')) article = S.topicPlan?.supporting_articles?.[parseInt(key.split('_')[1])]
   if (!article) return
   nav('generate')
   setTimeout(() => {
@@ -1199,21 +1199,20 @@ function renderPlanResult(plan) {
                 </div>
                 <div class="text-sm text-indigo-700 mb-1">📌 ${esc(a.suggested_title||'')}</div>
                 <div class="text-xs text-gray-600">${esc(a.reason||'')}</div>
-                <button class="btn btn-primary btn-sm mt-2" onclick="prefillGenerate(${JSON.stringify(esc(a.keyword))},${JSON.stringify(esc(a.suggested_title))})">✍️ Write This Article</button>
+                <button class="btn btn-primary btn-sm mt-2" onclick="prefillGenerateKw(${JSON.stringify(esc(a.keyword))},${JSON.stringify(esc(a.suggested_title))})">✍️ Write This Article</button>
               </div>`).join('')}
           </div>
         </div>` : ''}
     </div>`
 }
 
-function prefillGenerate(keyword, title) {
-  S.auditTab = 'blog'
+function prefillGenerateKw(keyword, title) {
   nav('generate')
   setTimeout(() => {
-    const kw = document.getElementById('gen-keyword')
+    const kw = document.getElementById('gen-kw')
     const ti = document.getElementById('gen-title')
-    if (kw) kw.value = keyword
-    if (ti) ti.value = title
+    if (kw) kw.value = keyword || ''
+    if (ti) ti.value = title || ''
   }, 100)
 }
 
@@ -1839,7 +1838,7 @@ function renderSuggestions(data) {
                 <div class="text-xs text-gray-500">${esc(k.reason)}</div>
                 <div class="flex gap-1 mt-2">
                   <button class="btn btn-secondary btn-sm" onclick="prefillRankingCheck('${esc(k.keyword)}')">Check rank</button>
-                  <button class="btn btn-primary btn-sm" onclick="prefillGenerate('${esc(k.keyword)}','')">Write</button>
+                  <button class="btn btn-primary btn-sm" onclick="prefillGenerateKw('${esc(k.keyword)}','')">Write</button>
                 </div>
               </div>`).join('')}
           </div>
@@ -1869,7 +1868,7 @@ function renderSuggestions(data) {
                 <div class="font-medium text-gray-800 text-sm mb-0.5">${esc(t.topic)}</div>
                 <div class="text-xs text-indigo-700 mb-1">📌 ${esc(t.suggested_title)}</div>
                 <div class="text-xs text-gray-500 mb-2">${esc(t.reason)}</div>
-                <button class="btn btn-primary btn-sm" onclick="prefillGenerate('${esc(t.topic)}','${esc(t.suggested_title)}')">✍️ Write this</button>
+                <button class="btn btn-primary btn-sm" onclick="prefillGenerateKw('${esc(t.topic)}','${esc(t.suggested_title)}')">✍️ Write this</button>
               </div>`).join('')}
           </div>
         </div>` : ''}
@@ -1884,7 +1883,7 @@ function renderSuggestions(data) {
                   <span class="font-medium text-sm text-gray-800">${esc(g.keyword)}</span>
                   <span class="text-xs text-gray-500 ml-2">${esc(g.reason)}</span>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="prefillGenerate('${esc(g.keyword)}','')">Fill gap →</button>
+                <button class="btn btn-primary btn-sm" onclick="prefillGenerateKw('${esc(g.keyword)}','')">Fill gap →</button>
               </div>`).join('')}
           </div>
         </div>` : ''}
