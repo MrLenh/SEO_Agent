@@ -1490,11 +1490,6 @@ function doConnect() {
 
 // ══════════════════════════ AUTH ═════════════════════════════
 function showLogin(isRegister = false) {
-  // Check if any users exist (bootstrap mode)
-  fetch('/api/v1/users/me', { headers: S.token ? { Authorization: 'Bearer ' + S.token } : {} })
-    .then(r => r.status === 404 ? 'bootstrap' : 'login')
-    .catch(() => 'login')
-
   const tab = isRegister ? 'register' : 'login'
   document.getElementById('content').innerHTML = `
     <div class="flex items-center justify-center min-h-full">
