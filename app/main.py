@@ -91,19 +91,46 @@ async def debug_shopify(db: Session = Depends(get_db)):
         "Content-Type": "application/json",
     }
 
+    endpoint = f"https://{shop}/admin/api/{ver}/graphql.json"
+
     async with httpx.AsyncClient(timeout=15.0) as client:
-        # 1. Check what scopes this token was granted
         scopes_resp = await client.get(
             f"https://{shop}/admin/oauth/access_scopes.json",
             headers=headers,
         )
 
-        # 2. Try the blogs GraphQL query
-        gql_resp = await client.post(
-            f"https://{shop}/admin/api/{ver}/graphql.json",
-            headers=headers,
+        blogs_resp = await client.post(
+            endpoint, headers=headers,
             json={"query": "{ blogs(first: 5) { nodes { id title handle } } }"},
         )
+
+        # Test articles query with every possible field variant
+        blogs_data = blogs_resp.json()
+        first_blog_id = None
+        if blogs_data.get("data", {}).get("blogs", {}).get("nodes"):
+            first_blog_id = blogs_data["data"]["blogs"]["nodes"][0]["id"]
+
+        articles_resp = None
+        if first_blog_id:
+            articles_resp = await client.post(
+                endpoint, headers=headers,
+                json={"query": f"""{{
+                  blog(id: "{first_blog_id}") {{
+                    articles(first: 3) {{
+                      nodes {{
+                        id title handle
+                        body
+                        author {{ name }}
+                        tags
+                        image {{ url altText }}
+                        isPublished
+                        publishedAt updatedAt
+                        seo {{ title description }}
+                      }}
+                    }}
+                  }}
+                }}"""},
+            )
 
     return {
         "shop": shop,
@@ -114,8 +141,13 @@ async def debug_shopify(db: Session = Depends(get_db)):
             "body": scopes_resp.text,
         },
         "blogs_gql": {
-            "http_status": gql_resp.status_code,
-            "body": gql_resp.json() if gql_resp.status_code == 200 else gql_resp.text,
+            "http_status": blogs_resp.status_code,
+            "body": blogs_resp.json() if blogs_resp.status_code == 200 else blogs_resp.text,
+        },
+        "articles_gql": {
+            "first_blog_id": first_blog_id,
+            "http_status": articles_resp.status_code if articles_resp else None,
+            "body": articles_resp.json() if articles_resp and articles_resp.status_code == 200 else (articles_resp.text if articles_resp else None),
         },
     }
 
