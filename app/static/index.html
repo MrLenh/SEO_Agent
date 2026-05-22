@@ -283,15 +283,17 @@ async function renderDashboard() {
 
   try {
     const sp = S.currentShop ? `&shop_domain=${encodeURIComponent(S.currentShop)}` : ''
-    const [posts, clusters] = await Promise.all([
+    const [postsResp, clusters] = await Promise.all([
       GET(`/api/v1/blogs/?limit=10&page=1${sp}`),
       GET('/api/v1/topics/?limit=100'),
     ])
+    const posts = postsResp.items || []
+    const totalPosts = postsResp.total ?? posts.length
     const published = posts.filter(p => p.status === 'published').length
     const drafts    = posts.filter(p => p.status === 'draft').length
 
     document.getElementById('stat-cards').innerHTML = [
-      { icon: '📝', label: 'Total Posts',     value: posts.length,     color: 'indigo' },
+      { icon: '📝', label: 'Total Posts',     value: totalPosts,       color: 'indigo' },
       { icon: '✅', label: 'Published',        value: published,        color: 'green'  },
       { icon: '📋', label: 'Drafts',           value: drafts,           color: 'yellow' },
       { icon: '🗂', label: 'Topic Clusters',   value: clusters.length,  color: 'purple' },
@@ -380,15 +382,22 @@ async function loadPosts() {
     ...(S.currentShop && { shop_domain: S.currentShop }),
   })
   try {
-    let posts = await GET(`/api/v1/blogs/?${q}`)
+    const resp = await GET(`/api/v1/blogs/?${q}`)
+    let posts = resp.items || []
+    const total = resp.total ?? posts.length
+    const totalPages = resp.total_pages ?? 1
     if (S.postsStatus) posts = posts.filter(p => p.status === S.postsStatus)
     S.posts = posts
 
     const tbl = document.getElementById('posts-table')
+    const pager = document.getElementById('posts-pager')
     if (!tbl) return
 
     if (!posts.length) {
       tbl.innerHTML = `<div class="py-12 text-center text-gray-400 text-sm">No posts found.</div>`
+      if (pager) pager.innerHTML = total > 0
+        ? `<div>Filtered to 0 results from ${total} total — try clearing filters.</div><div></div>`
+        : ''
       return
     }
 
@@ -423,10 +432,31 @@ async function loadPosts() {
           </tr>`).join('')}
         </tbody>
       </table>`
+
+    if (pager) {
+      const from = (S.postsPage - 1) * 20 + 1
+      const to   = (S.postsPage - 1) * 20 + posts.length
+      const prevDisabled = S.postsPage <= 1
+      const nextDisabled = S.postsPage >= totalPages
+      pager.innerHTML = `
+        <div>Showing <strong>${from}–${to}</strong> of <strong>${total}</strong> post${total===1?'':'s'}</div>
+        <div class="flex items-center gap-2">
+          <button class="btn btn-secondary btn-sm" ${prevDisabled?'disabled':''} onclick="gotoPostsPage(${S.postsPage-1})">← Prev</button>
+          <span class="text-xs text-gray-400">Page ${S.postsPage} / ${totalPages || 1}</span>
+          <button class="btn btn-secondary btn-sm" ${nextDisabled?'disabled':''} onclick="gotoPostsPage(${S.postsPage+1})">Next →</button>
+        </div>`
+    }
   } catch(e) {
     const tbl = document.getElementById('posts-table')
     if (tbl) tbl.innerHTML = `<div class="text-red-500 text-sm py-4 text-center">Error: ${esc(e.message)}</div>`
   }
+}
+
+function gotoPostsPage(p) {
+  if (p < 1) return
+  S.postsPage = p
+  loadPosts()
+  window.scrollTo({top: 0, behavior: 'smooth'})
 }
 
 async function viewPost(id) {

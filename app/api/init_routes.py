@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.blog_post import BlogChannel, BlogPost, Platform
-from app.schemas.blog_post import BlogChannelOut, BlogPostOut, SyncResult
+from app.schemas.blog_post import BlogChannelOut, BlogPostOut, PaginatedPosts, SyncResult
 from app.services.auth_service import check_store_scope, get_current_user, get_user_shops
 from app.services.shopify_crawler import ShopifyCrawler
 
@@ -85,7 +85,7 @@ def list_channels(
     ]
 
 
-@blog_router.get("/", response_model=list[BlogPostOut])
+@blog_router.get("/", response_model=PaginatedPosts)
 def list_posts(
     platform: Optional[Platform] = None,
     source: Optional[str] = Query(None, description="'synced' | 'generated'"),
@@ -109,8 +109,10 @@ def list_posts(
             | BlogPost.focus_keyword.ilike(f"%{keyword}%")
         )
 
+    total = q.count()
     posts = q.order_by(BlogPost.published_at.desc()).offset((page - 1) * limit).limit(limit).all()
-    return posts
+    total_pages = (total + limit - 1) // limit if total else 0
+    return PaginatedPosts(items=posts, total=total, page=page, limit=limit, total_pages=total_pages)
 
 
 @blog_router.get("/{post_id}", response_model=BlogPostOut)

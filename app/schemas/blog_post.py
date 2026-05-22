@@ -44,6 +44,14 @@ class BlogPostOut(BaseModel):
         from_attributes = True
 
 
+class PaginatedPosts(BaseModel):
+    items: list[BlogPostOut]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
 class SyncResult(BaseModel):
     platform: str
     shop: str
