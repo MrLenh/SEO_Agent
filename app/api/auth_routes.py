@@ -71,7 +71,8 @@ async def shopify_oauth_start(shop: str = Query(..., description="mystore.myshop
   <a href="/" class="inline-block px-5 py-2 bg-indigo-600 text-white rounded-xl">← Back</a>
 </div></body></html>""", status_code=200)
 
-    redirect_uri = f"{settings.APP_URL.rstrip('/')}/auth/shopify/callback"
+    base_url = settings.APP_URL.strip().rstrip("/")
+    redirect_uri = f"{base_url}/auth/shopify/callback"
     url = (
         f"https://{shop}/admin/oauth/authorize?"
         + urlencode({
@@ -149,6 +150,32 @@ async def shopify_oauth_callback(
   </div>
 </body>
 </html>""")
+
+
+# ── Debug: show exact OAuth URL ──────────────────────────────────────────────
+
+@auth_router.get("/shopify/debug-url", include_in_schema=False)
+def shopify_debug_url(shop: str = Query("example.myshopify.com")):
+    """Show the exact OAuth URL + redirect_uri that will be sent to Shopify."""
+    base_url = settings.APP_URL.strip().rstrip("/")
+    redirect_uri = f"{base_url}/auth/shopify/callback"
+    oauth_url = (
+        f"https://{shop}/admin/oauth/authorize?"
+        + urlencode({
+            "client_id": settings.SHOPIFY_API_KEY,
+            "scope": SCOPES,
+            "redirect_uri": redirect_uri,
+        })
+    )
+    return {
+        "app_url_raw": repr(settings.APP_URL),
+        "app_url_cleaned": base_url,
+        "redirect_uri": redirect_uri,
+        "redirect_uri_length": len(redirect_uri),
+        "scopes": SCOPES,
+        "full_oauth_url": oauth_url,
+        "partner_dashboard_must_have": redirect_uri,
+    }
 
 
 # ── Status endpoint ───────────────────────────────────────────────────────────
