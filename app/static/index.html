@@ -82,6 +82,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: rgb(55 65 81);
     <a class="nav-link" data-page="research"  onclick="nav('research')">🔍 Keyword Research</a>
     <a class="nav-link" data-page="topics"    onclick="nav('topics')">🗂 Topic Clusters</a>
     <a class="nav-link" data-page="generate"  onclick="nav('generate')">✍️ Generate Article</a>
+    <a class="nav-link" data-page="audit"     onclick="nav('audit')">📈 SEO Audit</a>
   </nav>
   <div class="px-5 py-3">
     <div class="text-indigo-600 text-xs">v0.3.0 · Phase 3A/3B</div>
@@ -126,6 +127,9 @@ const S = {
   research: null,
   generated: null,
   topicPlan: null,
+  auditTab: 'blog',
+  auditResults: null,
+  rankingResults: null,
 }
 let outlineItems = ['Giới thiệu', 'Nội dung chính', 'Lưu ý quan trọng', 'FAQ']
 
@@ -169,9 +173,9 @@ function nav(page) {
   S.page = page
   document.querySelectorAll('.nav-link').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page))
-  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article' }
+  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit' }
   document.getElementById('page-title').textContent = titles[page] || page
-  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate }
+  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit }
   pages[page]?.()
 }
 
@@ -854,6 +858,323 @@ function showGenerateResult(r) {
         </button>
       </div>
     </div>`
+}
+
+// ═══════════════════════ SEO AUDIT ═══════════════════════════
+function renderAudit() {
+  document.getElementById('header-actions').innerHTML =
+    `<button class="btn btn-secondary btn-sm" onclick="renderAudit()">↻ Refresh</button>`
+
+  const tabs = [
+    { id:'blog', label:'📋 Blog Audit' },
+    { id:'rankings', label:'📍 Keyword Rankings' },
+    { id:'plan', label:'🎯 Ranking Plan' },
+  ]
+  const tabBar = tabs.map(t =>
+    `<button onclick="S.auditTab='${t.id}';renderAudit()"
+      class="px-4 py-2 text-sm font-medium rounded-lg transition-colors ${S.auditTab===t.id?'bg-indigo-600 text-white':'text-gray-600 hover:bg-gray-100'}">${t.label}</button>`
+  ).join('')
+
+  let body = ''
+  if (S.auditTab === 'blog') body = renderAuditBlogTab()
+  else if (S.auditTab === 'rankings') body = renderAuditRankingsTab()
+  else body = renderAuditPlanTab()
+
+  document.getElementById('content').innerHTML = `
+    <div class="space-y-4">
+      <div class="card flex gap-2 p-3">${tabBar}</div>
+      ${body}
+    </div>`
+
+  if (S.auditTab === 'blog' && S.auditResults) renderAuditBlogResults(S.auditResults)
+  if (S.auditTab === 'rankings' && S.rankingResults) renderRankingResults(S.rankingResults)
+  if (S.auditTab === 'plan' && S.planResult) renderPlanResult(S.planResult)
+}
+
+function renderAuditBlogTab() {
+  return `
+    <div class="card">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="font-semibold text-gray-800">Blog Post SEO Audit</h2>
+          <p class="text-sm text-gray-500 mt-0.5">Analyze all posts for SEO issues — score, word count, headings, keyword usage</p>
+        </div>
+        <button class="btn btn-primary" id="audit-btn" onclick="runBlogAudit()">🔍 Run Audit</button>
+      </div>
+      <div id="audit-blog-results"></div>
+    </div>`
+}
+
+async function runBlogAudit() {
+  const btn = document.getElementById('audit-btn')
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Auditing…'
+  try {
+    const data = await GET('/api/v1/audit/posts')
+    S.auditResults = data
+    renderAuditBlogResults(data)
+  } catch(e) { toast('Audit failed: ' + e.message, 'error') }
+  finally { btn.disabled = false; btn.innerHTML = '🔍 Run Audit' }
+}
+
+function renderAuditBlogResults(results) {
+  const el = document.getElementById('audit-blog-results')
+  if (!el) return
+  if (!results.length) { el.innerHTML = '<p class="text-gray-400 text-sm">No posts found. Sync first.</p>'; return }
+
+  const gradeColor = g => ({'A':'badge-green','B':'badge-blue','C':'badge-yellow','D':'badge-yellow','F':'badge-red'}[g]||'badge-gray')
+  const scoreBar = s => {
+    const color = s>=85?'bg-green-500':s>=70?'bg-blue-500':s>=55?'bg-yellow-500':'bg-red-500'
+    return `<div class="w-full bg-gray-100 rounded-full h-1.5 mt-1"><div class="${color} h-1.5 rounded-full" style="width:${s}%"></div></div>`
+  }
+
+  el.innerHTML = `
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-gray-100 text-xs text-gray-500 uppercase">
+          <th class="text-left py-2 pr-4">Post</th>
+          <th class="text-center py-2 px-2">Score</th>
+          <th class="text-center py-2 px-2">Words</th>
+          <th class="text-center py-2 px-2">H2s</th>
+          <th class="text-left py-2 px-2">Top Issue</th>
+          <th class="py-2"></th>
+        </tr></thead>
+        <tbody>
+          ${results.map((r,i) => `
+            <tr class="border-b border-gray-50 table-row cursor-pointer" onclick="toggleAuditRow(${i})">
+              <td class="py-3 pr-4">
+                <div class="font-medium text-gray-800 truncate max-w-xs" title="${esc(r.title)}">${esc(r.title)}</div>
+                <div class="text-xs text-gray-400">${r.focus_keyword ? '🔑 '+esc(r.focus_keyword) : 'no keyword'}</div>
+              </td>
+              <td class="text-center py-3 px-2">
+                <div class="font-bold text-lg ${r.score>=85?'text-green-600':r.score>=70?'text-blue-600':r.score>=55?'text-yellow-600':'text-red-600'}">${r.score}</div>
+                <div class="text-xs font-bold ${r.score>=85?'text-green-500':r.score>=70?'text-blue-500':r.score>=55?'text-yellow-500':'text-red-500'}">${r.grade}</div>
+                ${scoreBar(r.score)}
+              </td>
+              <td class="text-center py-3 px-2 text-gray-700">${r.word_count.toLocaleString()}</td>
+              <td class="text-center py-3 px-2 text-gray-700">${r.h2_count}</td>
+              <td class="py-3 px-2 text-gray-500 text-xs max-w-xs truncate">${r.issues[0]||'✅ No major issues'}</td>
+              <td class="py-3 pl-2"><span class="text-gray-400 text-xs">${r.issues.length} issue${r.issues.length!==1?'s':''} ▾</span></td>
+            </tr>
+            <tr id="audit-expand-${i}" class="hidden bg-gray-50">
+              <td colspan="6" class="px-4 py-3">
+                <div class="space-y-1">
+                  ${r.issues.length ? r.issues.map(issue => `<div class="text-xs text-amber-700 bg-amber-50 rounded px-3 py-1.5">⚠ ${esc(issue)}</div>`).join('') : '<div class="text-xs text-green-700 bg-green-50 rounded px-3 py-1.5">✅ Post looks good!</div>'}
+                </div>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="mt-3 text-xs text-gray-400">Average score: ${Math.round(results.reduce((a,r)=>a+r.score,0)/results.length)}/100 across ${results.length} posts</div>`
+}
+
+function toggleAuditRow(i) {
+  const el = document.getElementById('audit-expand-'+i)
+  if (el) el.classList.toggle('hidden')
+}
+
+function renderAuditRankingsTab() {
+  const savedKws = S.rankingKeywords || ''
+  const savedShop = S.shopDomain || ''
+  return `
+    <div class="card">
+      <h2 class="font-semibold text-gray-800 mb-1">Keyword Rankings</h2>
+      <p class="text-sm text-gray-500 mb-4">Check where your store ranks on Google for specific keywords</p>
+      <div class="grid grid-cols-3 gap-4 mb-4">
+        <div class="col-span-2">
+          <label>Keywords (one per line)</label>
+          <textarea id="ranking-keywords" rows="5" placeholder="christmas cactus care&#10;indoor plants for beginners&#10;best succulents">${esc(savedKws)}</textarea>
+        </div>
+        <div>
+          <label>Shop Domain</label>
+          <input type="text" id="ranking-shop" value="${esc(savedShop)}" placeholder="yourstore.myshopify.com">
+          <p class="text-xs text-gray-400 mt-1">Used to find your URLs in results</p>
+          <button class="btn btn-primary w-full mt-3" id="ranking-btn" onclick="runRankingCheck()" style="width:100%;justify-content:center">📍 Check Rankings</button>
+        </div>
+      </div>
+      <div id="ranking-results"></div>
+    </div>`
+}
+
+async function runRankingCheck() {
+  const keywords = (document.getElementById('ranking-keywords').value||'').split('\n').map(k=>k.trim()).filter(Boolean)
+  const shop = (document.getElementById('ranking-shop').value||'').trim()
+  S.rankingKeywords = document.getElementById('ranking-keywords').value
+  S.shopDomain = shop
+  if (!keywords.length) { toast('Enter at least one keyword', 'error'); return }
+  const btn = document.getElementById('ranking-btn')
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Checking…'
+  try {
+    const data = await POST('/api/v1/audit/rankings', { keywords, shop_domain: shop })
+    S.rankingResults = data
+    renderRankingResults(data)
+  } catch(e) { toast('Check failed: ' + e.message, 'error') }
+  finally { btn.disabled = false; btn.innerHTML = '📍 Check Rankings' }
+}
+
+function renderRankingResults(data) {
+  const el = document.getElementById('ranking-results')
+  if (!el) return
+  const results = data.results || []
+  if (!results.length) { el.innerHTML = '<p class="text-sm text-gray-400">No results.</p>'; return }
+
+  const posBadge = pos => {
+    if (!pos) return '<span class="badge badge-gray">Not ranking</span>'
+    if (pos <= 3) return `<span class="badge badge-green">#${pos} 🏆</span>`
+    if (pos <= 10) return `<span class="badge badge-blue">#${pos}</span>`
+    if (pos <= 20) return `<span class="badge badge-yellow">#${pos}</span>`
+    return `<span class="badge badge-gray">#${pos}</span>`
+  }
+
+  const ranking = results.filter(r => r.position)
+  const notRanking = results.filter(r => !r.position)
+
+  el.innerHTML = `
+    <div class="overflow-x-auto mt-2">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-gray-100 text-xs text-gray-500 uppercase">
+          <th class="text-left py-2 pr-4">Keyword</th>
+          <th class="text-center py-2 px-3">Position</th>
+          <th class="text-left py-2 px-3">Ranking URL</th>
+        </tr></thead>
+        <tbody>
+          ${results.map(r => `
+            <tr class="border-b border-gray-50 table-row">
+              <td class="py-2.5 pr-4 font-medium text-gray-800">${esc(r.keyword)}</td>
+              <td class="text-center py-2.5 px-3">${posBadge(r.position)}</td>
+              <td class="py-2.5 px-3 text-xs text-gray-500 max-w-xs truncate">
+                ${r.ranking_url ? `<a href="${esc(r.ranking_url)}" target="_blank" class="text-indigo-600 hover:underline truncate block">${esc(r.ranking_title||r.ranking_url)}</a>` : '—'}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="mt-3 flex gap-3 text-xs text-gray-400">
+      <span>Ranking: <strong class="text-green-600">${ranking.length}</strong></span>
+      <span>Not ranking: <strong class="text-gray-500">${notRanking.length}</strong></span>
+      ${ranking.length ? `<span>Best: <strong class="text-blue-600">#${Math.min(...ranking.map(r=>r.position))} for "${ranking.sort((a,b)=>a.position-b.position)[0].keyword}"</strong></span>` : ''}
+    </div>
+    ${S.rankingResults ? `<div class="mt-4"><button class="btn btn-primary btn-sm" onclick="S.auditTab='plan';renderAudit()">🎯 Generate Ranking Plan →</button></div>` : ''}`
+}
+
+function renderAuditPlanTab() {
+  const hasRankings = S.rankingResults && S.rankingResults.results && S.rankingResults.results.length
+  return `
+    <div class="card">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="font-semibold text-gray-800">AI Ranking Plan</h2>
+          <p class="text-sm text-gray-500 mt-0.5">GPT-4o analyzes your rankings and creates a prioritized action plan</p>
+        </div>
+        <button class="btn btn-primary" id="plan-btn" onclick="runGeneratePlan()" ${!hasRankings?'disabled':''}>
+          ${!hasRankings ? '⚠ Check Rankings First' : '🎯 Generate Plan'}
+        </button>
+      </div>
+      ${!hasRankings ? '<div class="text-sm text-amber-600 bg-amber-50 rounded-lg p-3">Run "Keyword Rankings" tab first, then come back here to generate a plan.</div>' : ''}
+      <div id="plan-results"></div>
+    </div>`
+}
+
+async function runGeneratePlan() {
+  if (!S.rankingResults) { toast('Run Keyword Rankings first', 'error'); return }
+  const btn = document.getElementById('plan-btn')
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Generating…'
+  try {
+    const data = await POST('/api/v1/audit/plan', {
+      rankings: S.rankingResults.results,
+      shop_domain: S.rankingResults.shop,
+    })
+    S.planResult = data
+    renderPlanResult(data)
+  } catch(e) { toast('Plan generation failed: ' + e.message, 'error') }
+  finally { btn.disabled = false; btn.innerHTML = '🎯 Generate Plan' }
+}
+
+function renderPlanResult(plan) {
+  const el = document.getElementById('plan-results')
+  if (!el) return
+
+  const effortBadge = e => e==='low'?'badge-green':e==='medium'?'badge-yellow':'badge-red'
+  const impactBadge = e => e==='high'?'badge-green':e==='medium'?'badge-blue':'badge-gray'
+
+  el.innerHTML = `
+    <div class="space-y-4 mt-4">
+      ${plan.summary ? `<div class="bg-indigo-50 rounded-xl p-4 text-sm text-indigo-800">${esc(plan.summary)}</div>` : ''}
+
+      ${plan.priority_actions?.length ? `
+        <div>
+          <h3 class="font-semibold text-gray-700 mb-2">⚡ Priority Actions</h3>
+          <ol class="space-y-1.5">
+            ${plan.priority_actions.map((a,i) => `
+              <li class="flex gap-3 text-sm">
+                <span class="flex-shrink-0 w-6 h-6 bg-indigo-600 text-white rounded-full flex items-center justify-center text-xs font-bold">${i+1}</span>
+                <span class="text-gray-700">${esc(a)}</span>
+              </li>`).join('')}
+          </ol>
+        </div>` : ''}
+
+      ${plan.quick_wins?.length ? `
+        <div>
+          <h3 class="font-semibold text-gray-700 mb-2">🏆 Quick Wins <span class="text-xs font-normal text-gray-400">(keywords near page 1 — push them over)</span></h3>
+          <div class="space-y-2">
+            ${plan.quick_wins.map(w => `
+              <div class="border border-green-100 bg-green-50 rounded-xl p-3">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="font-medium text-gray-800">${esc(w.keyword)}</span>
+                  <div class="flex gap-2">
+                    <span class="badge badge-gray">#${w.current_position||'?'} → #${w.target_position||'?'}</span>
+                    <span class="badge ${effortBadge(w.effort)}">${esc(w.effort||'')} effort</span>
+                  </div>
+                </div>
+                ${w.post_title ? `<div class="text-xs text-gray-500 mb-1">Post: ${esc(w.post_title)}</div>` : ''}
+                <div class="text-sm text-gray-700">${esc(w.action||'')}</div>
+              </div>`).join('')}
+          </div>
+        </div>` : ''}
+
+      ${plan.content_updates?.length ? `
+        <div>
+          <h3 class="font-semibold text-gray-700 mb-2">✏️ Content Updates</h3>
+          <div class="space-y-2">
+            ${plan.content_updates.map(u => `
+              <div class="border border-blue-100 bg-blue-50 rounded-xl p-3">
+                <div class="font-medium text-gray-800 mb-1">${esc(u.post_title||'Post #'+u.post_id)}</div>
+                <ul class="space-y-1">
+                  ${(u.recommendations||[]).map(r=>`<li class="text-xs text-gray-600">• ${esc(r)}</li>`).join('')}
+                </ul>
+                ${u.post_id ? `<button class="btn btn-secondary btn-sm mt-2" onclick="S.page='posts';renderPosts()">Open Post →</button>` : ''}
+              </div>`).join('')}
+          </div>
+        </div>` : ''}
+
+      ${plan.new_articles?.length ? `
+        <div>
+          <h3 class="font-semibold text-gray-700 mb-2">📝 New Articles to Write</h3>
+          <div class="space-y-2">
+            ${plan.new_articles.map(a => `
+              <div class="border border-purple-100 bg-purple-50 rounded-xl p-3">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="font-medium text-gray-800">${esc(a.keyword)}</span>
+                  <span class="badge ${impactBadge(a.estimated_impact)}">${esc(a.estimated_impact||'')} impact</span>
+                </div>
+                <div class="text-sm text-indigo-700 mb-1">📌 ${esc(a.suggested_title||'')}</div>
+                <div class="text-xs text-gray-600">${esc(a.reason||'')}</div>
+                <button class="btn btn-primary btn-sm mt-2" onclick="prefillGenerate(${JSON.stringify(esc(a.keyword))},${JSON.stringify(esc(a.suggested_title))})">✍️ Write This Article</button>
+              </div>`).join('')}
+          </div>
+        </div>` : ''}
+    </div>`
+}
+
+function prefillGenerate(keyword, title) {
+  S.auditTab = 'blog'
+  nav('generate')
+  setTimeout(() => {
+    const kw = document.getElementById('gen-keyword')
+    const ti = document.getElementById('gen-title')
+    if (kw) kw.value = keyword
+    if (ti) ti.value = title
+  }, 100)
 }
 
 // ═══════════════════ SHOPIFY CONNECT ═════════════════════════

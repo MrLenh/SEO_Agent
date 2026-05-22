@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
+from app.api.audit_routes import audit_router
 from app.api.auth_routes import auth_router
 from app.api.content_routes import generate_router, research_router, topics_router
 from app.api.init_routes import blog_router, router as init_router
@@ -42,6 +43,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(audit_router)
 app.include_router(auth_router)
 app.include_router(init_router)
 app.include_router(blog_router)
