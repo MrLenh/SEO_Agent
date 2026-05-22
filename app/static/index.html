@@ -1903,7 +1903,7 @@ async function init() {
   // No valid session — check if any users exist
   try {
     const status = await fetch('/api/v1/users/setup-status').then(r => r.json())
-    showLogin(status.bootstrapped)  // true = users exist = show login; false = show register
+    showLogin(!status.bootstrapped)  // no users → show register; has users → show login
   } catch { showLogin(false) }
 }
 init()
