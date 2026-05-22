@@ -13,3 +13,5 @@ beautifulsoup4==4.12.3
 lxml==5.3.0
 pytrends==4.9.2
 openai==1.58.1
+google-auth==2.37.0
+requests==2.32.3

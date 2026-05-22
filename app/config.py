@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # SEO
     SERPER_API_KEY: str = ""
 
+    # Google Search Console
+    GOOGLE_SERVICE_ACCOUNT_JSON: str = ""  # full JSON content of service account key
+    GSC_SITE_URL: str = ""                 # e.g. https://gingerglow.myshopify.com/
+
     # Cloudinary
     CLOUDINARY_URL: str = ""
 

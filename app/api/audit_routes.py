@@ -108,3 +108,76 @@ Be specific and actionable. Base recommendations on actual ranking data."""
         messages=[{"role": "user", "content": prompt}],
     )
     return json.loads(resp.choices[0].message.content)
+
+
+# ── Google Search Console ─────────────────────────────────────────────────────
+
+@audit_router.get("/gsc/status")
+def gsc_status():
+    """Check if GSC is configured and credentials are valid."""
+    from app.services import gsc_client as gsc
+    if not gsc.is_configured():
+        return {
+            "configured": False,
+            "message": "Set GOOGLE_SERVICE_ACCOUNT_JSON and GSC_SITE_URL in Railway env vars.",
+        }
+    try:
+        gsc._get_credentials()
+        return {"configured": True, "site_url": settings.GSC_SITE_URL}
+    except Exception as e:
+        return {"configured": False, "error": str(e)}
+
+
+@audit_router.get("/gsc/overview")
+def gsc_overview(days: int = 28):
+    from app.services import gsc_client as gsc
+    if not gsc.is_configured():
+        raise HTTPException(422, "GSC not configured")
+    try:
+        return gsc.get_overview(days)
+    except Exception as e:
+        raise HTTPException(502, f"GSC API error: {e}")
+
+
+@audit_router.get("/gsc/pages")
+def gsc_top_pages(days: int = 28, limit: int = 25):
+    from app.services import gsc_client as gsc
+    if not gsc.is_configured():
+        raise HTTPException(422, "GSC not configured")
+    try:
+        return gsc.get_top_pages(days, limit)
+    except Exception as e:
+        raise HTTPException(502, f"GSC API error: {e}")
+
+
+@audit_router.get("/gsc/queries")
+def gsc_top_queries(days: int = 28, limit: int = 25, page: Optional[str] = None):
+    from app.services import gsc_client as gsc
+    if not gsc.is_configured():
+        raise HTTPException(422, "GSC not configured")
+    try:
+        return gsc.get_top_queries(days, limit, page)
+    except Exception as e:
+        raise HTTPException(502, f"GSC API error: {e}")
+
+
+@audit_router.get("/gsc/opportunities")
+def gsc_opportunities(days: int = 28):
+    from app.services import gsc_client as gsc
+    if not gsc.is_configured():
+        raise HTTPException(422, "GSC not configured")
+    try:
+        return gsc.get_opportunities(days)
+    except Exception as e:
+        raise HTTPException(502, f"GSC API error: {e}")
+
+
+@audit_router.get("/gsc/sparkline")
+def gsc_sparkline(days: int = 90):
+    from app.services import gsc_client as gsc
+    if not gsc.is_configured():
+        raise HTTPException(422, "GSC not configured")
+    try:
+        return gsc.get_sparkline(days)
+    except Exception as e:
+        raise HTTPException(502, f"GSC API error: {e}")
