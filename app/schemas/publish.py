@@ -4,8 +4,9 @@ from pydantic import BaseModel, Field
 
 class PublishToShopifyRequest(BaseModel):
     blog_id: int = Field(..., description="Shopify blog ID (channel platform_id)")
+    shop_domain: Optional[str] = Field(None, description="Target store domain")
     author: str = "SEO Agent"
-    published: bool = True   # False → saves as draft on Shopify side
+    published: bool = True
 
 
 class GenerateImageRequest(BaseModel):
@@ -15,6 +16,7 @@ class GenerateImageRequest(BaseModel):
 
 class FullPublishRequest(BaseModel):
     blog_id: int = Field(..., description="Shopify blog ID (channel platform_id)")
+    shop_domain: Optional[str] = Field(None, description="Target store domain")
     author: str = "SEO Agent"
     published: bool = True
     generate_image: bool = True

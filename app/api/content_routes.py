@@ -100,6 +100,24 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
     # Generate slug from title
     slug = re.sub(r"[^a-z0-9]+", "-", body.title.lower()).strip("-")
 
+    # Load brand profile for the store
+    brand_profile = None
+    try:
+        from app.models.brand_profile import BrandProfile
+        bp = db.query(BrandProfile).filter_by(shop_domain=body.shop_domain).first()
+        if not bp and body.shop_domain:
+            bp = db.query(BrandProfile).filter_by(shop_domain=None).first()
+        if bp:
+            brand_profile = {
+                "brand_name": bp.brand_name,
+                "brand_style": bp.brand_style,
+                "brand_description": bp.brand_description,
+                "tone_of_voice": bp.tone_of_voice,
+                "output_requirements": bp.output_requirements,
+            }
+    except Exception:
+        pass
+
     result = await writer.write(
         title=body.title,
         focus_keyword=body.focus_keyword,
@@ -111,6 +129,7 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
         word_count=body.word_count,
         db=db,
         exclude_slug=slug,
+        brand_profile=brand_profile,
     )
 
     # Save draft to DB

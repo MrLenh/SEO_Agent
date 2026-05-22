@@ -66,6 +66,7 @@ class ContentWriter:
         language: str,
         tone: str,
         word_count: int,
+        brand_profile: Optional[dict] = None,
     ) -> tuple[str, str]:
         """Returns (system_prompt, user_prompt)."""
 
@@ -82,8 +83,27 @@ class ContentWriter:
             for r in external_refs[:3]:
                 external_ctx += f'- <a href="{r["url"]}" target="_blank" rel="noopener">{r["title"]}</a>: {r.get("snippet", "")}\n'
 
-        system = f"""You are a professional SEO content writer. Rules:
-- Write in {language}, tone: {tone}
+        brand_ctx = ""
+        bp = brand_profile or {}
+        if bp.get("brand_name"):
+            brand_ctx += f"\nBrand: {bp['brand_name']}"
+        if bp.get("brand_description"):
+            brand_ctx += f"\nBrand description: {bp['brand_description']}"
+        if bp.get("brand_style"):
+            brand_ctx += f"\nBrand style: {bp['brand_style']}"
+        if bp.get("tone_of_voice"):
+            brand_ctx += f"\nTone of voice: {bp['tone_of_voice']}"
+        if bp.get("output_requirements"):
+            brand_ctx += f"\n\nOutput requirements:\n{bp['output_requirements']}"
+
+        tone_instruction = tone
+        if bp.get("tone_of_voice"):
+            tone_instruction = bp["tone_of_voice"]
+
+        system = f"""You are a professional SEO content writer.{brand_ctx}
+
+Writing rules:
+- Write in {language}, tone: {tone_instruction}
 - Target {word_count}+ words
 - Use focus keyword in: H1, first 100 words, at least 2 H2s, naturally throughout (2-3% density)
 - Structure: intro → H2 sections → FAQ (from PAA) → conclusion
@@ -129,6 +149,7 @@ Respond in this exact format:
         word_count: int = 1500,
         db: Session = None,
         exclude_slug: str = None,
+        brand_profile: Optional[dict] = None,
     ) -> dict:
         """Generate SEO article with internal + external links."""
 
@@ -145,6 +166,7 @@ Respond in this exact format:
         system, user = self._build_prompt(
             title, focus_keyword, outline, paa_questions,
             external_refs, internal_posts, language, tone, word_count,
+            brand_profile=brand_profile,
         )
 
         message = self.client.chat.completions.create(
