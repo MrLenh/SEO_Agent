@@ -1,16 +1,17 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
 
 from app.api.auth_routes import auth_router
 from app.api.content_routes import generate_router, research_router, topics_router
 from app.api.init_routes import blog_router, router as init_router
 from app.api.publish_routes import publish_router
-from app.database import create_tables
+from app.database import create_tables, get_db
 from app.models import shopify_store as _  # ensure table is registered
 
 logger = logging.getLogger(__name__)
@@ -63,17 +64,27 @@ def health():
 
 
 @app.get("/debug/shopify", include_in_schema=False)
-async def debug_shopify():
+async def debug_shopify(db: Session = Depends(get_db)):
     """Test Shopify token scopes and blogs GraphQL query."""
     import httpx
+    from app.api.auth_routes import get_store_token
     from app.config import settings
 
-    token = settings.SHOPIFY_ACCESS_TOKEN
-    shop  = settings.SHOPIFY_SHOP_DOMAIN
-    ver   = settings.SHOPIFY_API_VERSION
+    shop = settings.SHOPIFY_SHOP_DOMAIN
+    ver  = settings.SHOPIFY_API_VERSION
 
-    if not token or not shop:
-        return {"error": "SHOPIFY_ACCESS_TOKEN or SHOPIFY_SHOP_DOMAIN not set"}
+    if not shop:
+        return {"error": "SHOPIFY_SHOP_DOMAIN not set"}
+
+    token = get_store_token(shop, db)
+    token_source = "env_var"
+    from app.models.shopify_store import ShopifyStore
+    db_store = db.query(ShopifyStore).filter_by(shop_domain=shop).first()
+    if db_store and db_store.access_token:
+        token_source = "oauth_db"
+
+    if not token:
+        return {"error": "No access token found (env var or OAuth DB)"}
 
     headers = {
         "X-Shopify-Access-Token": token,
@@ -97,6 +108,7 @@ async def debug_shopify():
     return {
         "shop": shop,
         "api_version": ver,
+        "token_source": token_source,
         "token_scopes": scopes_resp.json() if scopes_resp.status_code == 200 else {
             "http_status": scopes_resp.status_code,
             "body": scopes_resp.text,
