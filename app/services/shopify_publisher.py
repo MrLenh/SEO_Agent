@@ -51,6 +51,18 @@ class ShopifyPublisher:
             "Content-Type": "application/json",
         }
 
+    @staticmethod
+    def _absolute_url(url: str) -> Optional[str]:
+        """Turn a relative /static/... path into an absolute URL using APP_URL."""
+        if not url:
+            return None
+        if url.startswith(("http://", "https://")):
+            return url
+        base = (settings.APP_URL or "").strip().rstrip("/")
+        if not base:
+            return None
+        return base + (url if url.startswith("/") else "/" + url)
+
     async def _gql(self, query: str, variables: dict) -> dict:
         async with httpx.AsyncClient(headers=self._headers(), timeout=120.0) as client:
             resp = await client.post(
@@ -88,8 +100,16 @@ class ShopifyPublisher:
             "isPublished": published,
         }
         if image_url:
+            absolute_url = self._absolute_url(image_url)
+            if not absolute_url:
+                raise ValueError(
+                    f"Cannot upload image to Shopify: image_url is relative "
+                    f"({image_url}) and APP_URL is not configured. Set APP_URL "
+                    f"in settings so Shopify can fetch the image."
+                )
+            # ArticleImageInput uses `url` (older Shopify versions used `src`)
             article_input["image"] = {
-                "src": image_url,
+                "url": absolute_url,
                 "altText": (image_alt or post.title)[:512],
             }
 
