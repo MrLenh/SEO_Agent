@@ -25,7 +25,7 @@ from app.models.shopify_store import ShopifyStore
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
-SCOPES = "read_content,write_content"
+SCOPES = "read_online_store_pages,write_online_store_pages"
 
 
 def _verify_shopify_hmac(params: dict, secret: str) -> bool:
