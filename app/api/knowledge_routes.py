@@ -471,9 +471,8 @@ Return JSON only:
         source_type="trend",
         shop_domain=body.shop_domain,
         db=db,
-        auto_approve=True,
     )
-    return {"item_id": item.id, "insights": insights}
+    return {"item_id": item.id, "status": item.status, "insights": insights}
 
 
 # ── Ranking analysis ──────────────────────────────────────────────────────────
@@ -552,6 +551,5 @@ Return JSON only:
         source_type="analysis",
         shop_domain=body.shop_domain,
         db=db,
-        auto_approve=True,
     )
-    return {"item_id": item.id, "analysis": analysis}
+    return {"item_id": item.id, "status": item.status, "analysis": analysis}
