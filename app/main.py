@@ -60,3 +60,21 @@ def ui():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/debug/config", include_in_schema=False)
+def debug_config():
+    """Shows which env vars are configured (no secret values)."""
+    from app.config import settings
+    def _set(v): return bool(v)
+    return {
+        "app_url":              settings.APP_URL or "(not set)",
+        "shopify_shop_domain":  settings.SHOPIFY_SHOP_DOMAIN or "(not set)",
+        "shopify_api_key":      _set(settings.SHOPIFY_API_KEY),
+        "shopify_api_secret":   _set(settings.SHOPIFY_API_SECRET),
+        "shopify_access_token": _set(settings.SHOPIFY_ACCESS_TOKEN),
+        "shopify_api_version":  settings.SHOPIFY_API_VERSION,
+        "openai_api_key":       _set(settings.OPENAI_API_KEY),
+        "serper_api_key":       _set(settings.SERPER_API_KEY),
+        "database_url":         settings.DATABASE_URL[:30] + "..." if settings.DATABASE_URL else "(not set)",
+    }

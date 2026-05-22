@@ -52,10 +52,24 @@ def get_store_token(shop_domain: str, db: Session) -> str:
 
 @auth_router.get("/shopify", include_in_schema=False)
 async def shopify_oauth_start(shop: str = Query(..., description="mystore.myshopify.com")):
+    missing = []
     if not settings.SHOPIFY_API_KEY:
-        raise HTTPException(400, "SHOPIFY_API_KEY not set in environment")
+        missing.append("SHOPIFY_API_KEY")
     if not settings.APP_URL:
-        raise HTTPException(400, "APP_URL not set in environment")
+        missing.append("APP_URL")
+    if missing:
+        return HTMLResponse(f"""<!DOCTYPE html>
+<html><head><title>Config Error</title><script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-gray-50 flex items-center justify-center min-h-screen">
+<div class="bg-white rounded-2xl shadow-lg p-10 text-center max-w-md">
+  <div class="text-5xl mb-4">⚠️</div>
+  <h2 class="text-xl font-bold text-red-700 mb-3">Missing Environment Variables</h2>
+  <div class="text-left bg-red-50 rounded-lg p-4 mb-6 text-sm font-mono">
+    {"<br>".join(f"❌ {v}" for v in missing)}
+  </div>
+  <p class="text-gray-500 text-sm mb-4">Set these on Railway → Variables, then redeploy.</p>
+  <a href="/" class="inline-block px-5 py-2 bg-indigo-600 text-white rounded-xl">← Back</a>
+</div></body></html>""", status_code=200)
 
     redirect_uri = f"{settings.APP_URL.rstrip('/')}/auth/shopify/callback"
     url = (
