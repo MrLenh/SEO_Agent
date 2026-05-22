@@ -1,7 +1,8 @@
 """
 Brand profile / global settings endpoints.
 
-GET  /api/v1/settings/brand?shop_domain=...  — fetch profile (returns empty dict if not set)
+GET  /api/v1/settings/brands                 — list all brand profiles
+GET  /api/v1/settings/brand?shop_domain=...  — fetch single profile
 PUT  /api/v1/settings/brand                  — create or update profile
 """
 from typing import Optional
@@ -36,6 +37,15 @@ def _profile_out(p: BrandProfile) -> dict:
         "output_requirements": p.output_requirements or "",
         "updated_at": p.updated_at,
     }
+
+
+@settings_router.get("/brands")
+def list_brand_profiles(
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    profiles = db.query(BrandProfile).order_by(BrandProfile.brand_name).all()
+    return [_profile_out(p) for p in profiles]
 
 
 @settings_router.get("/brand")

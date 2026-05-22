@@ -154,6 +154,8 @@ const S = {
   auditResults: null,
   rankingResults: null,
   brandProfile: null,
+  allBrands: [],
+  selectedBrandDomain: null,
   // Auth
   token: localStorage.getItem('seo_token') || '',
   user: null,
@@ -431,6 +433,20 @@ async function viewPost(id) {
       `<style>body{font-family:system-ui,sans-serif;padding:20px;font-size:14px;line-height:1.7;max-width:760px;margin:0 auto;color:#1f2937}h1,h2,h3{color:#111827}a{color:#4f46e5}</style>` +
       (p.content_html || '')
 
+    // Append feedback section below iframe
+    document.getElementById('modal-body').innerHTML += `
+      <div class="mt-4 border-t pt-4">
+        <div class="text-sm font-semibold text-gray-700 mb-2">📝 Feedback for Agent</div>
+        <div class="flex gap-1 mb-2" id="star-row">
+          ${[1,2,3,4,5].map(n=>`<button onclick="setRating(${n})" data-star="${n}"
+            class="text-2xl leading-none transition-transform hover:scale-110">☆</button>`).join('')}
+        </div>
+        <textarea id="fb-text" rows="2" placeholder="Overall feedback on this article…" class="mb-2"></textarea>
+        <textarea id="fb-improve" rows="2" placeholder="Improvement notes for future articles (the agent learns from this)…"></textarea>
+        <button class="btn btn-secondary btn-sm mt-2" onclick="submitFeedback(${id})">Send Feedback</button>
+        <div id="fb-status" class="text-xs text-gray-400 mt-1"></div>
+      </div>`
+
     document.getElementById('modal-footer').innerHTML = `
       ${p.status === 'draft'
         ? `<button class="btn btn-success btn-sm" onclick="closeModal();openPublishModal(${id},'${esc(p.title)}')">🚀 Publish to Shopify</button>`
@@ -439,6 +455,32 @@ async function viewPost(id) {
   } catch(e) {
     document.getElementById('modal-body').innerHTML = `<div class="text-red-500 text-sm">Error: ${esc(e.message)}</div>`
   }
+}
+
+// ─────────────────── Feedback helpers ─────────────────────────
+let _fbRating = 0
+function setRating(n) {
+  _fbRating = n
+  document.querySelectorAll('#star-row button').forEach(btn => {
+    btn.textContent = parseInt(btn.dataset.star) <= n ? '★' : '☆'
+    btn.style.color = parseInt(btn.dataset.star) <= n ? '#f59e0b' : ''
+  })
+}
+
+async function submitFeedback(postId) {
+  if (!_fbRating) { toast('Please select a rating', 'error'); return }
+  const body = {
+    rating: _fbRating,
+    feedback_text: document.getElementById('fb-text')?.value || '',
+    improvement_notes: document.getElementById('fb-improve')?.value || '',
+    shop_domain: S.currentShop || '',
+  }
+  try {
+    await POST(`/api/v1/generate/article/${postId}/feedback`, body)
+    document.getElementById('fb-status').textContent = '✅ Feedback saved! The agent will apply these improvements to future articles.'
+    document.getElementById('fb-status').className = 'text-xs text-green-600 mt-1'
+    _fbRating = 0
+  } catch(e) { toast('Failed to save feedback: ' + e.message, 'error') }
 }
 
 // ─────────────────── Publish modal ────────────────────────────
@@ -730,8 +772,29 @@ function prefillGenerate(key) {
 }
 
 // ═══════════════════ GENERATE ARTICLE ════════════════════════
-function renderGenerate() {
+async function renderGenerate() {
   document.getElementById('header-actions').innerHTML = ''
+  // Load brand profiles (once)
+  if (!S.allBrands.length) {
+    try {
+      S.allBrands = await GET('/api/v1/settings/brands')
+      // Auto-select: if only 1 brand, use it; else use currentShop match
+      if (S.selectedBrandDomain === null) {
+        if (S.allBrands.length === 1) S.selectedBrandDomain = S.allBrands[0].shop_domain
+        else {
+          const match = S.allBrands.find(b => b.shop_domain === S.currentShop)
+          if (match) S.selectedBrandDomain = match.shop_domain
+        }
+      }
+    } catch { S.allBrands = [] }
+  }
+
+  const brandOpts = S.allBrands.map(b =>
+    `<option value="${esc(b.shop_domain||'')}" ${S.selectedBrandDomain===b.shop_domain?'selected':''}>
+      ${esc(b.brand_name || b.shop_domain || 'Global profile')}
+    </option>`).join('')
+  const selectedBrand = S.allBrands.find(b => b.shop_domain === S.selectedBrandDomain)
+
   document.getElementById('content').innerHTML = `
     <div class="grid gap-6" style="grid-template-columns:1fr 320px">
       <!-- Left: form -->
@@ -783,6 +846,24 @@ function renderGenerate() {
             </div>
           </div>
         </div>
+
+        <!-- Brand profile selector -->
+        <div class="card ${S.allBrands.length ? '' : 'opacity-50'}">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-sm font-semibold text-gray-700">🎨 Brand Profile</div>
+            <a class="text-xs text-indigo-500 cursor-pointer" onclick="nav('brand')">Edit →</a>
+          </div>
+          ${S.allBrands.length === 0
+            ? `<div class="text-xs text-gray-400">No brand profiles yet. <a class="text-indigo-500 cursor-pointer" onclick="nav('brand')">Create one →</a></div>`
+            : `<select id="gen-brand" onchange="selectGenBrand(this.value)" class="w-full">
+                <option value="">— No brand profile —</option>
+                ${brandOpts}
+               </select>
+               ${selectedBrand?.brand_description
+                 ? `<div class="text-xs text-gray-500 mt-2 line-clamp-2">${esc(selectedBrand.brand_description)}</div>`
+                 : ''}`}
+        </div>
+
         <button id="gen-btn" class="btn btn-primary w-full" style="width:100%;justify-content:center" onclick="doGenerate()">
           ✍️ Generate Article with GPT-4o
         </button>
@@ -801,6 +882,13 @@ function renderGenerate() {
 
   renderOutline()
   if (S.generated) showGenerateResult(S.generated)
+}
+
+function selectGenBrand(domain) {
+  S.selectedBrandDomain = domain || null
+  const brand = S.allBrands.find(b => b.shop_domain === (domain || null))
+  const desc = document.querySelector('#gen-brand + div')
+  if (desc) desc.textContent = brand?.brand_description || ''
 }
 
 function renderOutline() {
@@ -841,13 +929,14 @@ async function doGenerate() {
 
   try {
     const channelId = document.getElementById('gen-channel').value
+    const brandDomain = document.getElementById('gen-brand')?.value || S.selectedBrandDomain
     const r = await POST('/api/v1/generate/article', {
       title, focus_keyword: keyword, outline,
       language:        document.getElementById('gen-lang').value,
       tone:            document.getElementById('gen-tone').value,
       word_count:      parseInt(document.getElementById('gen-words').value),
       blog_channel_id: channelId ? parseInt(channelId) : null,
-      shop_domain:     S.currentShop || null,
+      shop_domain:     brandDomain || S.currentShop || null,
     })
     S.generated = r
     showGenerateResult(r)
@@ -889,13 +978,36 @@ function showGenerateResult(r) {
 
       <div class="space-y-2 pt-1">
         <button class="btn btn-secondary btn-sm w-full" style="width:100%;justify-content:center" onclick="viewPost(${r.id})">
-          👁 Preview Full Article
+          👁 Preview &amp; Feedback
         </button>
         <button class="btn btn-success btn-sm w-full" style="width:100%;justify-content:center" onclick="openPublishModal(${r.id},'${esc(r.title)}')">
           🚀 Publish to Shopify
         </button>
       </div>
+
+      <div class="border-t pt-3">
+        <div class="text-xs font-medium text-gray-600 mb-1">Quick rating</div>
+        <div class="flex gap-1" id="qstar-row-${r.id}">
+          ${[1,2,3,4,5].map(n=>`<button onclick="quickRate(${r.id},${n})" data-star="${n}"
+            class="text-xl leading-none transition-transform hover:scale-110">☆</button>`).join('')}
+        </div>
+        <div id="qfb-status-${r.id}" class="text-xs text-gray-400 mt-1"></div>
+      </div>
     </div>`
+}
+
+async function quickRate(postId, rating) {
+  document.querySelectorAll(`#qstar-row-${postId} button`).forEach(btn => {
+    btn.textContent = parseInt(btn.dataset.star) <= rating ? '★' : '☆'
+    btn.style.color = parseInt(btn.dataset.star) <= rating ? '#f59e0b' : ''
+  })
+  try {
+    await POST(`/api/v1/generate/article/${postId}/feedback`, {
+      rating, feedback_text: '', improvement_notes: '', shop_domain: S.currentShop || ''
+    })
+    const st = document.getElementById(`qfb-status-${postId}`)
+    if (st) st.textContent = '✅ Rated! Open article to add detailed notes.'
+  } catch(e) { toast('Rating failed: ' + e.message, 'error') }
 }
 
 // ═══════════════════════ SEO AUDIT ═══════════════════════════
@@ -1595,7 +1707,8 @@ function selectShop(shop) {
   localStorage.setItem('seo_shop', shop)
   const sel = document.getElementById('store-selector')
   if (sel) sel.value = shop
-  S.auditResults = null; S.rankingResults = null; S.planResult = null; S.brandProfile = null
+  S.auditResults = null; S.rankingResults = null; S.planResult = null
+  S.brandProfile = null; S.allBrands = []; S.selectedBrandDomain = null
   if (S.page === 'audit') renderAudit()
   if (S.page === 'brand') renderBrand()
 }

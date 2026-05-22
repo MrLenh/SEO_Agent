@@ -118,6 +118,29 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
     except Exception:
         pass
 
+    # Collect improvement lessons from past feedback for this store
+    feedback_lessons = []
+    try:
+        from app.models.article_feedback import ArticleFeedback
+        past = (
+            db.query(ArticleFeedback)
+            .filter(
+                ArticleFeedback.shop_domain == body.shop_domain,
+                ArticleFeedback.improvement_notes != "",
+                ArticleFeedback.improvement_notes.isnot(None),
+            )
+            .order_by(ArticleFeedback.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        # Weight by rating: low-rated feedback is most important to learn from
+        for f in past:
+            if f.improvement_notes and f.improvement_notes.strip():
+                prefix = "⚠️ Avoid" if f.rating <= 2 else ("✅ Keep" if f.rating >= 4 else "💡 Note")
+                feedback_lessons.append(f"{prefix} (rated {f.rating}/5): {f.improvement_notes.strip()}")
+    except Exception:
+        pass
+
     result = await writer.write(
         title=body.title,
         focus_keyword=body.focus_keyword,
@@ -130,6 +153,7 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
         db=db,
         exclude_slug=slug,
         brand_profile=brand_profile,
+        feedback_lessons=feedback_lessons,
     )
 
     # Save draft to DB
@@ -177,3 +201,66 @@ def get_article_content(post_id: int, db: Session = Depends(get_db)):
         "tags": post.tags,
         "status": post.status,
     }
+
+
+# ── Feedback ──────────────────────────────────────────────────────────────────
+
+from pydantic import BaseModel as _Base
+
+class FeedbackBody(_Base):
+    rating: int                          # 1–5
+    feedback_text: str = ""
+    improvement_notes: str = ""
+    shop_domain: str = ""
+
+
+@generate_router.post("/article/{post_id}/feedback")
+def submit_feedback(
+    post_id: int,
+    body: FeedbackBody,
+    db: Session = Depends(get_db),
+):
+    from app.models.article_feedback import ArticleFeedback
+    from app.models.blog_post import BlogPost
+    from app.services.auth_service import get_current_user
+    from fastapi import Header
+    import re
+
+    if not 1 <= body.rating <= 5:
+        raise HTTPException(422, "Rating must be 1–5")
+    post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+
+    fb = ArticleFeedback(
+        post_id=post_id,
+        shop_domain=body.shop_domain or None,
+        rating=body.rating,
+        feedback_text=body.feedback_text,
+        improvement_notes=body.improvement_notes,
+    )
+    db.add(fb)
+    db.commit()
+    db.refresh(fb)
+    return {"id": fb.id, "rating": fb.rating, "created_at": fb.created_at}
+
+
+@generate_router.get("/article/{post_id}/feedback")
+def get_feedback(post_id: int, db: Session = Depends(get_db)):
+    from app.models.article_feedback import ArticleFeedback
+    items = (
+        db.query(ArticleFeedback)
+        .filter_by(post_id=post_id)
+        .order_by(ArticleFeedback.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": f.id,
+            "rating": f.rating,
+            "feedback_text": f.feedback_text,
+            "improvement_notes": f.improvement_notes,
+            "created_at": f.created_at,
+        }
+        for f in items
+    ]

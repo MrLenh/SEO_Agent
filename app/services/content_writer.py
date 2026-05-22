@@ -67,6 +67,7 @@ class ContentWriter:
         tone: str,
         word_count: int,
         brand_profile: Optional[dict] = None,
+        feedback_lessons: Optional[list] = None,
     ) -> tuple[str, str]:
         """Returns (system_prompt, user_prompt)."""
 
@@ -100,6 +101,11 @@ class ContentWriter:
         if bp.get("tone_of_voice"):
             tone_instruction = bp["tone_of_voice"]
 
+        lessons_ctx = ""
+        if feedback_lessons:
+            lessons_ctx = "\n\nLessons from feedback on previous articles (apply these):\n"
+            lessons_ctx += "\n".join(f"- {l}" for l in feedback_lessons)
+
         system = f"""You are a professional SEO content writer.{brand_ctx}
 
 Writing rules:
@@ -109,7 +115,7 @@ Writing rules:
 - Structure: intro → H2 sections → FAQ (from PAA) → conclusion
 - Use proper HTML tags: <h2>, <h3>, <p>, <ul>, <li>, <strong>
 - Never use <html>, <head>, <body> tags
-- End with a <section class="faq"> containing PAA questions as <h3> + <p> answers"""
+- End with a <section class="faq"> containing PAA questions as <h3> + <p> answers{lessons_ctx}"""
 
         user = f"""Write a complete SEO article:
 
@@ -150,6 +156,7 @@ Respond in this exact format:
         db: Session = None,
         exclude_slug: str = None,
         brand_profile: Optional[dict] = None,
+        feedback_lessons: Optional[list] = None,
     ) -> dict:
         """Generate SEO article with internal + external links."""
 
@@ -167,6 +174,7 @@ Respond in this exact format:
             title, focus_keyword, outline, paa_questions,
             external_refs, internal_posts, language, tone, word_count,
             brand_profile=brand_profile,
+            feedback_lessons=feedback_lessons,
         )
 
         message = self.client.chat.completions.create(

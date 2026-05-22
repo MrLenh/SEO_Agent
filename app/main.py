@@ -18,6 +18,7 @@ from app.database import create_tables, get_db
 from app.models import shopify_store as _   # ensure table is registered
 from app.models import user as _u           # ensure user tables are registered
 from app.models import brand_profile as _bp  # ensure brand_profiles table is registered
+from app.models import article_feedback as _af  # ensure article_feedback table is registered
 
 logger = logging.getLogger(__name__)
 
