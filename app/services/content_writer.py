@@ -210,6 +210,7 @@ Respond in this exact format:
             seo_description=result["seo_description"],
             focus_keyword=focus_keyword,
             tags=result["tags"],
+            image_prompt=result.get("image_prompt"),
             internal_links=result["internal_links"],
             status=PostStatus.DRAFT,
             source="generated",
