@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # Cloudinary
     CLOUDINARY_URL: str = ""
 
+    # Superadmin bootstrap (auto-created on first startup if set)
+    ADMIN_EMAIL: str = ""
+    ADMIN_PASSWORD: str = ""
+    ADMIN_NAME: str = "Super Admin"
+
     class Config:
         env_file = ".env"
 

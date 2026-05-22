@@ -25,9 +25,39 @@ async def lifespan(app: FastAPI):
     try:
         create_tables()
         logger.info("Database tables ready")
+        _bootstrap_superadmin()
     except Exception as e:
         logger.warning(f"DB init warning (non-fatal): {e}")
     yield
+
+
+def _bootstrap_superadmin():
+    """Create superadmin from env vars on first startup if no users exist."""
+    from app.config import settings
+    if not settings.ADMIN_EMAIL or not settings.ADMIN_PASSWORD:
+        return
+    from app.database import SessionLocal
+    from app.models.user import User
+    from app.services.auth_service import hash_password
+    db = SessionLocal()
+    try:
+        if db.query(User).count() > 0:
+            return  # users already exist, skip
+        admin = User(
+            email=settings.ADMIN_EMAIL,
+            name=settings.ADMIN_NAME or "Super Admin",
+            hashed_password=hash_password(settings.ADMIN_PASSWORD),
+            role="admin",
+            is_active=True,
+        )
+        db.add(admin)
+        db.commit()
+        logger.info(f"Superadmin created: {settings.ADMIN_EMAIL}")
+    except Exception as e:
+        logger.warning(f"Superadmin bootstrap failed: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
 
 app = FastAPI(
