@@ -2297,7 +2297,7 @@ async function kbTrend() {
           <div class="text-gray-500 mb-1">Article ideas:</div>
           ${ins.recommended_titles.map(t=>`<div class="flex items-center gap-1">• <a class="text-indigo-500 cursor-pointer" onclick="prefillGenerateKw(${JSON.stringify(esc(kw))},${JSON.stringify(esc(t))})">${esc(t)}</a></div>`).join('')}
         </div>` : ''}
-        <div class="text-xs text-green-600">✅ Saved to Knowledge Base (item #${r.item_id})</div>
+        <div class="text-xs text-yellow-700 mt-1">🕐 Saved to approval queue (item #${r.item_id}) — <a class="underline cursor-pointer" onclick="kbSetStatus(${r.item_id},'approved');this.parentElement.innerHTML='✅ Approved'">Approve now</a></div>
       </div>`
     kbLoadStats()
     kbLoadItems()
@@ -2333,7 +2333,7 @@ async function kbAnalyzeRankings() {
         <div class="font-medium text-green-800">${esc(a.performance_summary||'')}</div>
         ${a.writing_lessons?.length ? `<div class="text-xs"><div class="text-gray-500 mb-1">Writing lessons:</div>${a.writing_lessons.map(l=>`<div>• ${esc(l)}</div>`).join('')}</div>` : ''}
         ${a.improvement_priorities?.length ? `<div class="text-xs text-gray-600 mt-1"><b>Priorities:</b> ${a.improvement_priorities.join(' · ')}</div>` : ''}
-        <div class="text-xs text-green-600">✅ Saved to Knowledge Base (item #${r.item_id})</div>
+        <div class="text-xs text-yellow-700 mt-1">🕐 Saved to approval queue (item #${r.item_id}) — <a class="underline cursor-pointer" onclick="kbSetStatus(${r.item_id},'approved');this.parentElement.innerHTML='✅ Approved'">Approve now</a></div>
       </div>`
     kbLoadStats()
     kbLoadItems()
