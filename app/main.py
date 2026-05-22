@@ -125,7 +125,6 @@ async def debug_shopify(db: Session = Depends(get_db)):
                         image {{ url altText }}
                         isPublished
                         publishedAt updatedAt
-                        seo {{ title description }}
                       }}
                     }}
                   }}

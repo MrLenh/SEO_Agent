@@ -33,7 +33,6 @@ query Articles($blogId: ID!, $first: Int!, $after: String) {
         tags
         image { url altText }
         isPublished publishedAt updatedAt
-        seo { title description }
       }
     }
   }
@@ -127,7 +126,6 @@ class ShopifyCrawler:
     def _parse_article(self, article: dict, channel: BlogChannel) -> dict:
         tags   = article.get("tags") or []
         image  = article.get("image") or {}
-        seo    = article.get("seo") or {}
         author = (article.get("author") or {}).get("name")
         pub_at = article.get("publishedAt")
         published_at = datetime.fromisoformat(pub_at.replace("Z", "+00:00")) if pub_at else None
@@ -151,8 +149,8 @@ class ShopifyCrawler:
             "tags": tags,
             "featured_image_url": image.get("url"),
             "featured_image_alt": image.get("altText"),
-            "seo_title": seo.get("title"),
-            "seo_description": seo.get("description"),
+            "seo_title": None,
+            "seo_description": None,
             "status": status,
             "source": "synced",
             "published_at": published_at,
