@@ -262,6 +262,9 @@ async def rewrite_article(
     }
 
 
+from pydantic import BaseModel as _Base
+
+
 class _RewriteBody(_Base):
     instructions: str
     shop_domain: str = ""
@@ -285,9 +288,64 @@ def get_article_content(post_id: int, db: Session = Depends(get_db)):
     }
 
 
-# ── Feedback ──────────────────────────────────────────────────────────────────
+# ── Edit / Delete draft ───────────────────────────────────────────────────────
 
-from pydantic import BaseModel as _Base
+class _UpdateBody(_Base):
+    title: str = ""
+    content_html: str = ""
+    seo_title: str = ""
+    seo_description: str = ""
+    tags: list[str] = []
+
+
+@generate_router.put("/article/{post_id}")
+def update_article(post_id: int, body: _UpdateBody, db: Session = Depends(get_db)):
+    """Update a draft article's content and metadata."""
+    from app.models.blog_post import BlogPost, PostStatus
+    post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+    if post.status != PostStatus.DRAFT:
+        raise HTTPException(422, "Only draft posts can be edited")
+
+    if body.title:
+        post.title = body.title
+    if body.content_html:
+        post.content_html = body.content_html
+    if body.seo_title:
+        post.seo_title = body.seo_title
+    if body.seo_description:
+        post.seo_description = body.seo_description
+    post.tags = body.tags
+
+    db.commit()
+    db.refresh(post)
+    return {
+        "id": post.id,
+        "title": post.title,
+        "content_html": post.content_html,
+        "seo_title": post.seo_title,
+        "seo_description": post.seo_description,
+        "tags": post.tags,
+        "status": post.status,
+    }
+
+
+@generate_router.delete("/article/{post_id}")
+def delete_article(post_id: int, db: Session = Depends(get_db)):
+    """Delete a draft article permanently."""
+    from app.models.blog_post import BlogPost, PostStatus
+    post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+    if post.status != PostStatus.DRAFT:
+        raise HTTPException(422, "Only draft posts can be deleted here")
+    db.delete(post)
+    db.commit()
+    return {"deleted": post_id}
+
+
+# ── Feedback ──────────────────────────────────────────────────────────────────
 
 class FeedbackBody(_Base):
     rating: int                          # 1–5
