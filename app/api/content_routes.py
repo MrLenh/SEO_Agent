@@ -185,6 +185,88 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
     }
 
 
+@generate_router.post("/article/{post_id}/rewrite")
+async def rewrite_article(
+    post_id: int,
+    body: "_RewriteBody",
+    db: Session = Depends(get_db),
+):
+    from app.models.blog_post import BlogPost, PostStatus
+    from app.models.brand_profile import BrandProfile
+    from app.models.article_feedback import ArticleFeedback
+
+    post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+
+    # Load brand profile
+    brand_profile = None
+    shop = body.shop_domain
+    bp = db.query(BrandProfile).filter_by(shop_domain=shop).first()
+    if not bp and shop:
+        bp = db.query(BrandProfile).filter_by(shop_domain=None).first()
+    if bp:
+        brand_profile = {
+            "brand_name": bp.brand_name, "brand_style": bp.brand_style,
+            "brand_description": bp.brand_description, "tone_of_voice": bp.tone_of_voice,
+            "output_requirements": bp.output_requirements,
+        }
+
+    # Load feedback lessons
+    feedback_lessons = []
+    try:
+        past = (
+            db.query(ArticleFeedback)
+            .filter(
+                ArticleFeedback.shop_domain == shop,
+                ArticleFeedback.improvement_notes != "",
+                ArticleFeedback.improvement_notes.isnot(None),
+            )
+            .order_by(ArticleFeedback.created_at.desc())
+            .limit(10).all()
+        )
+        for f in past:
+            if f.improvement_notes and f.improvement_notes.strip():
+                prefix = "⚠️ Avoid" if f.rating <= 2 else ("✅ Keep" if f.rating >= 4 else "💡 Note")
+                feedback_lessons.append(f"{prefix} (rated {f.rating}/5): {f.improvement_notes.strip()}")
+    except Exception:
+        pass
+
+    writer = ContentWriter()
+    result = await writer.rewrite(
+        post=post,
+        instructions=body.instructions,
+        brand_profile=brand_profile,
+        feedback_lessons=feedback_lessons,
+    )
+
+    # Update post in DB
+    post.content_html    = result["content_html"]
+    post.seo_title       = result["seo_title"]
+    post.seo_description = result["seo_description"]
+    post.tags            = result["tags"]
+    if result["image_prompt"]:
+        post.image_prompt = result["image_prompt"]
+    post.status = PostStatus.DRAFT
+    db.commit()
+    db.refresh(post)
+
+    return {
+        "id": post.id,
+        "title": post.title,
+        "seo_title": post.seo_title,
+        "seo_description": post.seo_description,
+        "tags": post.tags,
+        "content_html": post.content_html,
+        "usage": result["usage"],
+    }
+
+
+class _RewriteBody(_Base):
+    instructions: str
+    shop_domain: str = ""
+
+
 @generate_router.get("/article/{post_id}/content")
 def get_article_content(post_id: int, db: Session = Depends(get_db)):
     """Get full HTML content of a generated article."""

@@ -217,6 +217,95 @@ Respond in this exact format:
             },
         }
 
+    # ── Rewrite ───────────────────────────────────────────────────────────────
+
+    async def rewrite(
+        self,
+        post: BlogPost,
+        instructions: str,
+        brand_profile: Optional[dict] = None,
+        feedback_lessons: Optional[list] = None,
+    ) -> dict:
+        """Rewrite an existing draft based on user instructions."""
+        bp = brand_profile or {}
+
+        brand_ctx = ""
+        if bp.get("brand_name"):
+            brand_ctx += f"\nBrand: {bp['brand_name']}"
+        if bp.get("tone_of_voice"):
+            brand_ctx += f"\nTone of voice: {bp['tone_of_voice']}"
+        if bp.get("output_requirements"):
+            brand_ctx += f"\n\nOutput requirements:\n{bp['output_requirements']}"
+
+        lessons_ctx = ""
+        if feedback_lessons:
+            lessons_ctx = "\n\nLessons from past feedback (keep these in mind):\n"
+            lessons_ctx += "\n".join(f"- {l}" for l in feedback_lessons)
+
+        system = f"""You are an expert SEO content editor.{brand_ctx}{lessons_ctx}
+
+Your job is to rewrite the given article based on the user's instructions.
+Rules:
+- Apply ALL the rewrite instructions precisely
+- Keep the focus keyword and SEO structure intact
+- Preserve internal/external links already in the article unless explicitly told to remove them
+- Use proper HTML: <h2>, <h3>, <p>, <ul>, <li>, <strong> — never <html>/<head>/<body>
+- Keep a <section class="faq"> if the original has one (update it if relevant)"""
+
+        user = f"""Rewrite this article based on the instructions below.
+
+**Rewrite instructions:**
+{instructions}
+
+**Original article:**
+{post.content_html or '(empty)'}
+
+**Current metadata:**
+- Title: {post.title}
+- Focus keyword: {post.focus_keyword or '(none)'}
+- SEO title: {post.seo_title or '(none)'}
+
+Respond in this exact format:
+
+<article>
+[full rewritten HTML content]
+</article>
+<meta>
+{{"seo_title": "60-char SEO title", "meta_description": "155-char description with keyword", "tags": ["tag1","tag2","tag3"], "image_prompt": "DALL-E prompt for a professional blog banner"}}
+</meta>"""
+
+        message = self.client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            max_tokens=5000,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user",   "content": user},
+            ],
+        )
+        raw = message.choices[0].message.content
+        article_match = re.search(r"<article>(.*?)</article>", raw, re.DOTALL)
+        meta_match    = re.search(r"<meta>\s*(\{.*?\})\s*</meta>", raw, re.DOTALL)
+
+        content_html = article_match.group(1).strip() if article_match else raw
+        meta = {}
+        if meta_match:
+            try:
+                meta = json.loads(meta_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        return {
+            "content_html":    content_html,
+            "seo_title":       meta.get("seo_title", post.seo_title or post.title[:60]),
+            "seo_description": meta.get("meta_description", post.seo_description or ""),
+            "tags":            meta.get("tags", post.tags or []),
+            "image_prompt":    meta.get("image_prompt", post.image_prompt or ""),
+            "usage": {
+                "input_tokens":  message.usage.prompt_tokens,
+                "output_tokens": message.usage.completion_tokens,
+            },
+        }
+
     # ── Save to DB ────────────────────────────────────────────────────────────
 
     def save_draft(

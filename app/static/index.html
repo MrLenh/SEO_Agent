@@ -433,8 +433,19 @@ async function viewPost(id) {
       `<style>body{font-family:system-ui,sans-serif;padding:20px;font-size:14px;line-height:1.7;max-width:760px;margin:0 auto;color:#1f2937}h1,h2,h3{color:#111827}a{color:#4f46e5}</style>` +
       (p.content_html || '')
 
-    // Append feedback section below iframe
     document.getElementById('modal-body').innerHTML += `
+      ${p.status === 'draft' ? `
+      <div class="mt-4 border-t pt-4" id="rewrite-section">
+        <div class="text-sm font-semibold text-gray-700 mb-1">✏️ Re-write Article</div>
+        <p class="text-xs text-gray-400 mb-2">Describe what to change — the agent rewrites the full article and saves it as the new draft.</p>
+        <textarea id="rw-instructions" rows="4"
+          placeholder="e.g.\n- Shorten the intro to 2 paragraphs\n- Add a comparison table between Product A and B in section 3\n- Change the tone to be more casual and friendly\n- Expand the FAQ with 3 more questions about pricing"></textarea>
+        <button class="btn btn-primary btn-sm mt-2 w-full" style="justify-content:center" id="rw-btn" onclick="doRewrite(${id})">
+          ✏️ Re-write with GPT-4o
+        </button>
+        <div id="rw-status" class="text-xs text-gray-400 mt-1"></div>
+      </div>` : ''}
+
       <div class="mt-4 border-t pt-4">
         <div class="text-sm font-semibold text-gray-700 mb-2">📝 Feedback for Agent</div>
         <div class="flex gap-1 mb-2" id="star-row">
@@ -454,6 +465,50 @@ async function viewPost(id) {
       <button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>`
   } catch(e) {
     document.getElementById('modal-body').innerHTML = `<div class="text-red-500 text-sm">Error: ${esc(e.message)}</div>`
+  }
+}
+
+// ─────────────────── Re-write ──────────────────────────────────
+async function doRewrite(postId) {
+  const instructions = document.getElementById('rw-instructions')?.value?.trim()
+  if (!instructions) { toast('Enter rewrite instructions', 'error'); return }
+
+  const btn = document.getElementById('rw-btn')
+  const status = document.getElementById('rw-status')
+  btn.disabled = true
+  btn.innerHTML = '<span class="spinner"></span> Rewriting with GPT-4o…'
+  if (status) status.textContent = 'This takes 20–40 seconds…'
+
+  try {
+    const r = await POST(`/api/v1/generate/article/${postId}/rewrite`, {
+      instructions,
+      shop_domain: S.currentShop || '',
+    })
+
+    // Refresh the preview with new content
+    const iframe = document.getElementById('preview-frame')
+    if (iframe) iframe.srcdoc =
+      `<style>body{font-family:system-ui,sans-serif;padding:20px;font-size:14px;line-height:1.7;max-width:760px;margin:0 auto;color:#1f2937}h1,h2,h3{color:#111827}a{color:#4f46e5}</style>` +
+      (r.content_html || '')
+
+    // Update meta display
+    document.querySelector('#modal-body .text-xs.bg-gray-50').innerHTML =
+      `<div><span class="text-gray-400">SEO Title:</span> ${esc(r.seo_title||'—')}</div>
+       <div><span class="text-gray-400">Meta:</span> ${esc(r.seo_description||'—')}</div>
+       <div><span class="text-gray-400">Tags:</span> ${(r.tags||[]).join(', ')||'—'}</div>`
+
+    document.getElementById('rw-instructions').value = ''
+    if (status) {
+      status.textContent = `✅ Rewritten! (${r.usage?.output_tokens||0} tokens used)`
+      status.className = 'text-xs text-green-600 mt-1'
+    }
+    toast('✅ Article rewritten and saved as draft', 'success')
+  } catch(e) {
+    if (status) { status.textContent = 'Error: ' + e.message; status.className = 'text-xs text-red-500 mt-1' }
+    toast('Rewrite failed: ' + e.message, 'error')
+  } finally {
+    btn.disabled = false
+    btn.innerHTML = '✏️ Re-write with GPT-4o'
   }
 }
 
