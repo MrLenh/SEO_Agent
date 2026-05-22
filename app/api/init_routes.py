@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.blog_post import BlogPost, Platform
+from app.models.blog_post import BlogChannel, BlogPost, Platform
 from app.schemas.blog_post import BlogChannelOut, BlogPostOut, SyncResult
 from app.services.shopify_crawler import ShopifyCrawler
 
@@ -37,6 +37,16 @@ async def init_shopify(
 # ── Blog post listing ─────────────────────────────────────────────────────────
 
 blog_router = APIRouter(prefix="/api/v1/blogs", tags=["blogs"])
+
+
+@blog_router.get("/channels")
+def list_channels(db: Session = Depends(get_db)):
+    """List all synced blog channels (blogs). Used to pick blog_id for publishing."""
+    channels = db.query(BlogChannel).order_by(BlogChannel.title).all()
+    return [
+        {"id": c.id, "platform_id": c.platform_id, "title": c.title, "handle": c.handle}
+        for c in channels
+    ]
 
 
 @blog_router.get("/", response_model=list[BlogPostOut])
