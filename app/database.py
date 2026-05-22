@@ -29,17 +29,30 @@ def create_tables():
 def _migrate_columns():
     """Idempotent ALTER TABLE for columns added after initial deployment."""
     is_sqlite = "sqlite" in str(engine.url)
-    with engine.begin() as conn:
-        inspector = inspect(engine)
-        if "blog_posts" not in inspector.get_table_names():
+
+    def add_cols(table: str, cols: list[tuple[str, str]]):
+        if table not in inspector.get_table_names():
             return
-        existing = {c["name"] for c in inspector.get_columns("blog_posts")}
-        pending = [
-            ("image_prompt", "TEXT"),
-        ]
-        for col, col_type in pending:
+        existing = {c["name"] for c in inspector.get_columns(table)}
+        for col, col_type in cols:
             if col not in existing:
                 if is_sqlite:
-                    conn.execute(text(f"ALTER TABLE blog_posts ADD COLUMN {col} {col_type}"))
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
                 else:
-                    conn.execute(text(f"ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS {col} {col_type}"))
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type}"))
+
+    with engine.begin() as conn:
+        inspector = inspect(engine)
+
+        add_cols("blog_posts", [
+            ("image_prompt", "TEXT"),
+        ])
+
+        add_cols("brand_profiles", [
+            ("gsc_site_url",      "VARCHAR(512)"),
+            ("gsc_refresh_token", "TEXT"),
+        ])
+
+        add_cols("article_feedback", [
+            ("shop_domain", "VARCHAR(255)"),
+        ])
