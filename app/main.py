@@ -62,6 +62,52 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/debug/shopify", include_in_schema=False)
+async def debug_shopify():
+    """Test Shopify token scopes and blogs GraphQL query."""
+    import httpx
+    from app.config import settings
+
+    token = settings.SHOPIFY_ACCESS_TOKEN
+    shop  = settings.SHOPIFY_SHOP_DOMAIN
+    ver   = settings.SHOPIFY_API_VERSION
+
+    if not token or not shop:
+        return {"error": "SHOPIFY_ACCESS_TOKEN or SHOPIFY_SHOP_DOMAIN not set"}
+
+    headers = {
+        "X-Shopify-Access-Token": token,
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        # 1. Check what scopes this token was granted
+        scopes_resp = await client.get(
+            f"https://{shop}/admin/oauth/access_scopes.json",
+            headers=headers,
+        )
+
+        # 2. Try the blogs GraphQL query
+        gql_resp = await client.post(
+            f"https://{shop}/admin/api/{ver}/graphql.json",
+            headers=headers,
+            json={"query": "{ blogs(first: 5) { nodes { id title handle } } }"},
+        )
+
+    return {
+        "shop": shop,
+        "api_version": ver,
+        "token_scopes": scopes_resp.json() if scopes_resp.status_code == 200 else {
+            "http_status": scopes_resp.status_code,
+            "body": scopes_resp.text,
+        },
+        "blogs_gql": {
+            "http_status": gql_resp.status_code,
+            "body": gql_resp.json() if gql_resp.status_code == 200 else gql_resp.text,
+        },
+    }
+
+
 @app.get("/debug/config", include_in_schema=False)
 def debug_config():
     """Shows which env vars are configured (no secret values)."""
