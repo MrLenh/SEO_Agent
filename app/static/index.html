@@ -2141,7 +2141,7 @@ function renderAuditRankingsTab() {
 
 async function testDataForSeo() {
   const el = document.getElementById('dataforseo-status')
-  if (el) el.innerHTML = '<div class="text-xs text-gray-400 mb-3">Testing DataForSEO connection…</div>'
+  if (el) el.innerHTML = '<div class="text-xs text-gray-400 mb-3"><span class="spinner-dark" style="width:12px;height:12px;display:inline-block"></span> Testing DataForSEO connection…</div>'
   try {
     const r = await GET('/api/v1/audit/volume/test?keyword=seo')
     if (!el) return
@@ -2149,16 +2149,22 @@ async function testDataForSeo() {
       const sample = r.sample_result
       el.innerHTML = `
         <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-3 text-xs space-y-1">
-          <div class="font-semibold text-green-700">✅ DataForSEO connected</div>
-          <div class="text-green-600">API status: ${r.api_status_message} · Cost: $${r.cost ?? '?'}</div>
-          ${sample ? `<div class="text-gray-600">Sample — keyword: <strong>${esc(sample.keyword)}</strong> | volume: <strong>${sample.search_volume?.toLocaleString() ?? '—'}</strong> | competition_index: <strong>${sample.competition_index ?? '—'}</strong> | CPC: <strong>$${sample.cpc ?? '—'}</strong></div>` : ''}
+          <div class="font-semibold text-green-700">✅ DataForSEO connected — ${esc(r.login_used||'')}</div>
+          <div class="text-green-600">API: ${esc(r.api_status_message||'')} · Cost per call: $${r.cost ?? '?'}</div>
+          ${sample ? `<div class="text-gray-700 bg-white rounded p-2 mt-1">
+            Sample "seo": volume <strong>${sample.search_volume?.toLocaleString() ?? '—'}</strong>
+            | competition <strong>${sample.competition_index ?? '—'}/100</strong>
+            | CPC <strong>$${sample.cpc ?? '—'}</strong>
+          </div>` : '<div class="text-gray-500">No sample data returned.</div>'}
         </div>`
     } else {
+      const hint = r.hint ? r.hint.split('\n').map(l => `<div>${esc(l)}</div>`).join('') : ''
       el.innerHTML = `
-        <div class="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-xs space-y-1">
-          <div class="font-semibold text-red-700">✗ DataForSEO connection failed</div>
-          <div class="text-red-600">${esc(r.error || r.api_status_message || 'Unknown error')}</div>
-          <div class="text-gray-500 mt-1">Check DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD env vars in Railway.</div>
+        <div class="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-xs space-y-1.5">
+          <div class="font-semibold text-red-700">✗ DataForSEO — ${esc(r.step||'error')}</div>
+          ${r.login_used ? `<div class="text-gray-500">Credentials used: <code class="bg-white px-1 rounded">${esc(r.login_used)}</code></div>` : ''}
+          <div class="text-red-700 font-medium">${esc(r.error || r.api_message || 'Unknown error')}</div>
+          ${hint ? `<div class="text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mt-1 space-y-0.5">${hint}</div>` : ''}
         </div>`
     }
   } catch(e) {
