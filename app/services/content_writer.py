@@ -18,6 +18,46 @@ class ContentWriter:
     def __init__(self):
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
+    # ── Product helpers ───────────────────────────────────────────────────────
+
+    def _find_relevant_products(
+        self,
+        db: Session,
+        focus_keyword: str,
+        shop_domain: str,
+        limit: int = 6,
+    ) -> list:
+        """Return store products most relevant to the focus keyword."""
+        try:
+            from app.models.product import Product
+            products = (
+                db.query(Product)
+                .filter(Product.shop_domain == shop_domain, Product.status == "active")
+                .limit(300)
+                .all()
+            )
+            kw_words = set(focus_keyword.lower().split())
+            scored = []
+            for p in products:
+                score = 0
+                title_words = set((p.title or "").lower().split())
+                tags_lower = [t.lower() for t in (p.tags or [])]
+                ptype = (p.product_type or "").lower()
+
+                overlap = kw_words & title_words
+                score += len(overlap) * 3
+                if any(focus_keyword.lower() in t or t in focus_keyword.lower() for t in tags_lower):
+                    score += 3
+                if ptype and (ptype in focus_keyword.lower() or focus_keyword.lower() in ptype):
+                    score += 2
+                if score > 0:
+                    scored.append((score, p))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            return [p for _, p in scored[:limit]]
+        except Exception:
+            return []
+
     # ── Internal link helpers ─────────────────────────────────────────────────
 
     def _find_related_posts(
@@ -74,6 +114,7 @@ class ContentWriter:
         notes: Optional[str] = None,
         market: str = "us",
         article_type: Optional[str] = None,
+        products: Optional[list] = None,
     ) -> tuple[str, str]:
         """Returns (system_prompt, user_prompt)."""
 
@@ -121,6 +162,28 @@ class ContentWriter:
 
         type_ctx = f"\n- Article type: {article_type}" if article_type else ""
 
+        product_ctx = ""
+        if products:
+            product_ctx = "\n\nSTORE PRODUCTS — use these for accurate internal links and recommendations:\n"
+            for p in products:
+                price_str = f" ({p.currency} {p.price_min:.0f})" if p.price_min else ""
+                desc = (p.description_text or "")[:120].strip()
+                product_ctx += f'- [{p.title}{price_str}]({p.platform_url})'
+                if p.product_type:
+                    product_ctx += f' | Type: {p.product_type}'
+                if p.tags:
+                    product_ctx += f' | Tags: {", ".join(p.tags[:5])}'
+                if desc:
+                    product_ctx += f'\n  {desc}'
+                product_ctx += "\n"
+            product_ctx += (
+                "\nProduct link rules:\n"
+                "- Insert 2-4 product links naturally in the body using <a href='URL'>Product Name</a>\n"
+                "- At the end of the article, add a <section class=\"recommended-products\"> block with "
+                "2-3 specific product recommendations (only if they are genuinely relevant to the topic)\n"
+                "- Use exact product URLs from the list above — do NOT invent URLs"
+            )
+
         system = f"""You are a professional SEO content writer.{brand_ctx}
 
 Writing rules:
@@ -131,7 +194,7 @@ Writing rules:
 - Structure: intro paragraph → <h2> sections → FAQ (from PAA) → conclusion paragraph
 - Use proper HTML tags: <h2>, <h3>, <p>, <ul>, <li>, <strong>
 - Never use <html>, <head>, <body> tags
-- End with a <section class="faq"> containing PAA questions as <h3> + <p> answers{lessons_ctx}{notes_ctx}{kb_context}"""
+- End with a <section class="faq"> containing PAA questions as <h3> + <p> answers{lessons_ctx}{notes_ctx}{kb_context}{product_ctx}"""
 
         user = f"""Write a complete SEO article (do NOT include an H1 — the title is handled by the platform):
 
@@ -201,6 +264,11 @@ Respond in this exact format:
             except Exception:
                 pass
 
+        # Relevant products for internal linking + recommendations
+        products = []
+        if db and shop_domain:
+            products = self._find_relevant_products(db, focus_keyword, shop_domain)
+
         system, user = self._build_prompt(
             title, focus_keyword, outline, paa_questions,
             external_refs, internal_posts, language, tone, word_count,
@@ -210,6 +278,7 @@ Respond in this exact format:
             notes=notes,
             market=market,
             article_type=article_type,
+            products=products,
         )
 
         message = self.client.chat.completions.create(

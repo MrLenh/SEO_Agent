@@ -93,6 +93,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: rgb(55 65 81);
     <a class="nav-link" data-page="generate"  onclick="nav('generate')">✍️ Generate Article</a>
     <a class="nav-link" data-page="audit"     onclick="nav('audit')">📈 SEO Audit</a>
     <a class="nav-link hidden" id="kb-nav-link" data-page="knowledge" onclick="nav('knowledge')">🧠 Knowledge Base</a>
+    <a class="nav-link" data-page="products"  onclick="nav('products')">🛍 Products KB</a>
     <a class="nav-link" data-page="brand"     onclick="nav('brand')">🎨 Brand Profile</a>
     <div id="admin-nav" class="hidden">
       <div class="border-t border-indigo-900 my-2"></div>
@@ -236,9 +237,9 @@ function nav(page) {
   S.page = page
   document.querySelectorAll('.nav-link').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page))
-  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', knowledge: 'Knowledge Base', users: 'User Management', brand: 'Brand Profile' }
+  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', knowledge: 'Knowledge Base', users: 'User Management', brand: 'Brand Profile', products: 'Products KB' }
   document.getElementById('page-title').textContent = titles[page] || page
-  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, knowledge: renderKnowledge, users: renderUsers, brand: renderBrand }
+  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, knowledge: renderKnowledge, users: renderUsers, brand: renderBrand, products: renderProducts }
   pages[page]?.()
 }
 
@@ -3137,6 +3138,120 @@ async function kbAnalyzeRankings() {
 }
 
 // ══════════════════════ BRAND PROFILE ════════════════════════
+// ═══════════════════ PRODUCTS KB ════════════════════════
+
+let _prodSearch = '', _prodType = '', _prodPage = 1
+
+async function renderProducts() {
+  document.getElementById('header-actions').innerHTML = `
+    <button class="btn btn-primary btn-sm" onclick="syncProducts()">🔄 Sync Products from Shopify</button>`
+
+  document.getElementById('content').innerHTML = `
+    <div class="card mb-4">
+      <div class="flex gap-3 flex-wrap">
+        <input type="text" id="prod-search" placeholder="Search products…" style="flex:1;min-width:180px"
+          value="${esc(_prodSearch)}" onkeyup="if(event.key==='Enter'){_prodSearch=this.value;_prodPage=1;loadProducts()}">
+        <select id="prod-type" style="width:180px" onchange="_prodType=this.value;_prodPage=1;loadProducts()">
+          <option value="">All types</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="_prodSearch=document.getElementById('prod-search').value;_prodPage=1;loadProducts()">Search</button>
+      </div>
+    </div>
+
+    <div id="prod-info" class="text-xs text-gray-400 mb-2"></div>
+    <div id="prod-grid" class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr))">${skeletons(6)}</div>
+    <div id="prod-pager" class="flex justify-between items-center mt-4 text-sm text-gray-500"></div>`
+
+  loadProducts()
+  loadProductTypes()
+}
+
+async function loadProductTypes() {
+  try {
+    const sp = S.currentShop ? `?shop_domain=${encodeURIComponent(S.currentShop)}` : ''
+    const types = await GET(`/api/v1/products/types${sp}`)
+    const sel = document.getElementById('prod-type')
+    if (!sel) return
+    const cur = _prodType
+    sel.innerHTML = `<option value="">All types</option>` +
+      types.map(t => `<option value="${esc(t)}" ${t===cur?'selected':''}>${esc(t)}</option>`).join('')
+  } catch {}
+}
+
+async function loadProducts() {
+  const q = new URLSearchParams({
+    page: _prodPage, limit: 24,
+    ...(_prodSearch && { search: _prodSearch }),
+    ...(_prodType   && { product_type: _prodType }),
+    ...(S.currentShop && { shop_domain: S.currentShop }),
+  })
+  const grid = document.getElementById('prod-grid')
+  const info = document.getElementById('prod-info')
+  if (grid) grid.innerHTML = skeletons(6)
+  try {
+    const r = await GET(`/api/v1/products/?${q}`)
+    const items = r.items || []
+    const total = r.total || 0
+    const totalPages = Math.ceil(total / 24) || 1
+
+    if (info) info.textContent = `${total} product${total===1?'':'s'} in KB`
+
+    if (!grid) return
+    if (!items.length) {
+      grid.innerHTML = `<div class="col-span-full text-center text-gray-400 py-12 text-sm">
+        No products found. <button class="text-indigo-500 underline" onclick="syncProducts()">Sync from Shopify →</button>
+      </div>`
+    } else {
+      grid.innerHTML = items.map(p => `
+        <div class="card hover:shadow-md transition-shadow cursor-pointer" onclick="viewProduct(${p.id})">
+          ${p.featured_image_url
+            ? `<img src="${esc(p.featured_image_url)}" alt="${esc(p.title)}" class="w-full rounded-lg mb-3 object-cover" style="height:140px">`
+            : `<div class="w-full rounded-lg mb-3 bg-gray-100 flex items-center justify-center text-3xl" style="height:140px">🛍</div>`}
+          <div class="font-medium text-gray-800 text-sm truncate" title="${esc(p.title)}">${esc(p.title)}</div>
+          ${p.product_type ? `<div class="text-xs text-indigo-500 mt-0.5">${esc(p.product_type)}</div>` : ''}
+          <div class="flex items-center justify-between mt-2">
+            <span class="text-xs text-gray-400">${p.vendor ? esc(p.vendor) : '—'}</span>
+            ${p.price_min != null ? `<span class="text-sm font-semibold text-gray-700">${p.currency} ${p.price_min.toFixed(0)}</span>` : ''}
+          </div>
+          ${(p.tags||[]).length
+            ? `<div class="flex flex-wrap gap-1 mt-2">${p.tags.slice(0,4).map(t=>`<span class="badge badge-gray text-xs">${esc(t)}</span>`).join('')}</div>`
+            : ''}
+          ${p.platform_url ? `<a href="${esc(p.platform_url)}" target="_blank" class="text-xs text-indigo-400 hover:underline mt-2 block">View on store ↗</a>` : ''}
+        </div>`).join('')
+    }
+
+    const pager = document.getElementById('prod-pager')
+    if (pager) {
+      pager.innerHTML = total > 24 ? `
+        <span>Page ${_prodPage} / ${totalPages}</span>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary btn-sm" ${_prodPage<=1?'disabled':''} onclick="_prodPage--;loadProducts()">← Prev</button>
+          <button class="btn btn-secondary btn-sm" ${_prodPage>=totalPages?'disabled':''} onclick="_prodPage++;loadProducts()">Next →</button>
+        </div>` : ''
+    }
+  } catch(e) {
+    if (grid) grid.innerHTML = `<div class="col-span-full text-red-400 text-sm py-8 text-center">Error: ${esc(e.message)}</div>`
+  }
+}
+
+async function syncProducts() {
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  toast('Syncing products…', 'info')
+  try {
+    const r = await POST(`/api/v1/products/sync?shop_domain=${encodeURIComponent(S.currentShop)}`)
+    toast(`✅ Synced ${r.synced} new, updated ${r.updated} products`, 'success')
+    loadProducts()
+    loadProductTypes()
+  } catch(e) { toast('Sync failed: ' + e.message, 'error') }
+}
+
+function viewProduct(id) {
+  // find from current loaded items or open store URL
+  toast('Open store URL to view product details', 'info')
+}
+
+// ═══════════════════ BRAND PROFILE ════════════════════════
+
 async function renderBrand() {
   const shop = S.currentShop
   document.getElementById('header-actions').innerHTML =
