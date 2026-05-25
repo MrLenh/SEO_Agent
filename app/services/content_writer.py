@@ -116,10 +116,18 @@ class ContentWriter:
                 internal_ctx += f'- <a href="{url}">{p.title}</a>\n'
 
         external_ctx = ""
+        _ALLOWED_DOMAINS = ("wikipedia.org", "who.int", "nih.gov", "cdc.gov", "usda.gov",
+                            ".gov", ".edu", "pubmed.ncbi", "doi.org", "ncbi.nlm.nih.gov")
         if external_refs:
-            external_ctx = "\n\nAvailable external authority references (definitions/citations only — see link rules above):\n"
-            for r in external_refs[:3]:
-                external_ctx += f'- <a href="{r["url"]}" target="_blank" rel="noopener noreferrer">{r["title"]}</a>: {r.get("snippet", "")}\n'
+            authority_refs = [
+                r for r in external_refs
+                if any(d in r.get("url", "") for d in _ALLOWED_DOMAINS)
+            ]
+            if authority_refs:
+                external_ctx = "\n\nAuthoritative references ONLY — Wikipedia / .gov / .edu / peer-reviewed only:\n"
+                for r in authority_refs[:2]:
+                    external_ctx += f'- <a href="{r["url"]}" target="_blank" rel="noopener noreferrer">{r["title"]}</a>: {r.get("snippet", "")}\n'
+                external_ctx += "(Do NOT link any commercial, retail, or brand sites — use them for research only, not as hyperlinks)\n"
 
         bp = brand_profile or {}
         tone_instruction = bp.get("tone_of_voice") or tone
@@ -175,13 +183,20 @@ class ContentWriter:
         if products:
             product_ctx = "\n\nSTORE PRODUCTS — use these for accurate internal links and recommendations:\n"
             for p in products:
-                price_str = f" ({p.currency} {p.price_min:.0f})" if p.price_min else ""
-                desc = (p.description_text or "")[:120].strip()
-                product_ctx += f'- [{p.title}{price_str}]({p.platform_url})'
-                if p.product_type:
-                    product_ctx += f' | Type: {p.product_type}'
-                if p.tags:
-                    product_ctx += f' | Tags: {", ".join(p.tags[:5])}'
+                price_min = p.get("price_min") if isinstance(p, dict) else getattr(p, "price_min", None)
+                currency  = p.get("currency",  "") if isinstance(p, dict) else getattr(p, "currency",  "")
+                title     = p.get("title",     "") if isinstance(p, dict) else getattr(p, "title",     "")
+                url       = p.get("platform_url","") if isinstance(p, dict) else getattr(p, "platform_url","")
+                ptype     = p.get("product_type","") if isinstance(p, dict) else getattr(p, "product_type","")
+                tags      = p.get("tags",      []) if isinstance(p, dict) else getattr(p, "tags",      [])
+                desc      = (p.get("description_text","") if isinstance(p, dict) else getattr(p, "description_text","") or "")[:120].strip()
+
+                price_str = f" ({currency} {price_min:.0f})" if price_min else ""
+                product_ctx += f'- [{title}{price_str}]({url})'
+                if ptype:
+                    product_ctx += f' | Type: {ptype}'
+                if tags:
+                    product_ctx += f' | Tags: {", ".join(tags[:5])}'
                 if desc:
                     product_ctx += f'\n  {desc}'
                 product_ctx += "\n"
@@ -209,15 +224,19 @@ Writing rules:
 INTERNAL LINKS — every navigational or CTA phrase MUST link internally:
 ✓ Correct: <a href="/blogs/news/slug">learn more about X</a>
 ✓ Correct: <a href="/products/slug">discover our Y</a>
-✓ Correct: <a href="/blogs/news/slug">read our guide on Z</a>
-✗ FORBIDDEN: linking "learn more / read more / discover / explore / find out / check out / see more / click here" to any external domain
-→ Use the internal links provided below for these phrases
+✗ FORBIDDEN: linking "learn more / read more / discover / explore /
+  find out / check out / see more / click here" to any external domain
+→ Use the internal links provided for these phrases
 
 EXTERNAL LINKS — only 2 permitted uses:
-✓ Define or explain a technical term, concept, or industry keyword (Wikipedia, official body, authoritative definition)
-✓ Cite a specific statistic, clinical study, or data source inline (e.g. "according to [Source]")
-✗ NEVER external links on navigational phrases (learn more, discover, explore, read more, etc.)
-✗ NEVER external links as calls-to-action that take readers away from the site
+✓ Define or explain a technical term, concept, or industry keyword
+  (Wikipedia, official body, authoritative definition — NOT a retail or commercial site)
+✓ Cite a specific statistic, clinical study, or data source inline
+  (peer-reviewed journal, government/academic source ONLY — NOT a brand, blog, or retailer)
+✗ NEVER external links on navigational phrases
+✗ NEVER external links as calls-to-action
+✗ NEVER link to any commercial website, competitor, retailer, or brand as a "source"
+→ If a fact comes from a commercial site: state it as general knowledge WITHOUT a link
 → External links must use: target="_blank" rel="noopener noreferrer"
 ━━━ END LINK STRATEGY ━━━
 
