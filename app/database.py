@@ -53,6 +53,31 @@ def _migrate_columns():
             ("semantic_keywords",   "TEXT"),
         ])
 
+        # platform_guidelines table is created by SQLAlchemy create_all;
+        # this block handles the case where it was added after initial deployment.
+        if "platform_guidelines" not in inspector.get_table_names():
+            conn.execute(text("""
+                CREATE TABLE platform_guidelines (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform VARCHAR(50) NOT NULL UNIQUE,
+                    display_name VARCHAR(100) NOT NULL,
+                    icon VARCHAR(10) DEFAULT '🔍',
+                    content TEXT NOT NULL,
+                    is_active BOOLEAN DEFAULT 1,
+                    updated_at TIMESTAMP
+                )
+            """) if is_sqlite else text("""
+                CREATE TABLE IF NOT EXISTS platform_guidelines (
+                    id SERIAL PRIMARY KEY,
+                    platform VARCHAR(50) NOT NULL UNIQUE,
+                    display_name VARCHAR(100) NOT NULL,
+                    icon VARCHAR(10) DEFAULT '🔍',
+                    content TEXT NOT NULL,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    updated_at TIMESTAMP
+                )
+            """))
+
         add_cols("brand_profiles", [
             ("gsc_site_url",      "VARCHAR(512)"),
             ("gsc_refresh_token", "TEXT"),

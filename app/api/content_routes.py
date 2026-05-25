@@ -307,6 +307,7 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
         notes=body.notes,
         market=body.market,
         article_type=body.article_type,
+        target_platform=body.target_platform or "google",
     )
 
     # Save draft to DB

@@ -553,3 +553,91 @@ Return JSON only:
         db=db,
     )
     return {"item_id": item.id, "status": item.status, "analysis": analysis}
+
+
+# ── Platform Guidelines ───────────────────────────────────────────────────────
+
+class PlatformGuidelineUpdate(BaseModel):
+    display_name: Optional[str] = None
+    icon: Optional[str] = None
+    content: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@knowledge_router.get("/platforms")
+def list_platforms(db: Session = Depends(get_db)):
+    """List all platform SEO guidelines (summary, no full content)."""
+    from app.models.platform_guideline import PlatformGuideline
+    rows = db.query(PlatformGuideline).order_by(PlatformGuideline.platform).all()
+    return [
+        {
+            "platform": r.platform,
+            "display_name": r.display_name,
+            "icon": r.icon,
+            "is_active": r.is_active,
+            "updated_at": r.updated_at,
+            "content_preview": (r.content or "")[:120] + "..." if len(r.content or "") > 120 else r.content,
+        }
+        for r in rows
+    ]
+
+
+@knowledge_router.get("/platforms/{platform}")
+def get_platform(platform: str, db: Session = Depends(get_db)):
+    """Get full guideline content for a platform."""
+    from app.models.platform_guideline import PlatformGuideline
+    row = db.query(PlatformGuideline).filter_by(platform=platform).first()
+    if not row:
+        raise HTTPException(404, f"Platform '{platform}' not found")
+    return {
+        "platform": row.platform,
+        "display_name": row.display_name,
+        "icon": row.icon,
+        "content": row.content,
+        "is_active": row.is_active,
+        "updated_at": row.updated_at,
+    }
+
+
+@knowledge_router.put("/platforms/{platform}")
+def update_platform(platform: str, body: PlatformGuidelineUpdate, db: Session = Depends(get_db)):
+    """Update a platform guideline (admin)."""
+    from datetime import datetime
+    from app.models.platform_guideline import PlatformGuideline
+    row = db.query(PlatformGuideline).filter_by(platform=platform).first()
+    if not row:
+        raise HTTPException(404, f"Platform '{platform}' not found")
+    if body.display_name is not None:
+        row.display_name = body.display_name
+    if body.icon is not None:
+        row.icon = body.icon
+    if body.content is not None:
+        row.content = body.content
+    if body.is_active is not None:
+        row.is_active = body.is_active
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return {"platform": row.platform, "display_name": row.display_name, "is_active": row.is_active, "updated_at": row.updated_at}
+
+
+@knowledge_router.post("/platforms/{platform}/reset")
+def reset_platform(platform: str, db: Session = Depends(get_db)):
+    """Reset a platform guideline to its built-in default."""
+    from datetime import datetime
+    from app.models.platform_guideline import PlatformGuideline
+    from app.services.platform_guidelines import DEFAULT_GUIDELINES
+    defaults = {g["platform"]: g for g in DEFAULT_GUIDELINES}
+    if platform not in defaults:
+        raise HTTPException(404, f"No default found for platform '{platform}'")
+    row = db.query(PlatformGuideline).filter_by(platform=platform).first()
+    if not row:
+        raise HTTPException(404, f"Platform '{platform}' not found in DB")
+    d = defaults[platform]
+    row.display_name = d["display_name"]
+    row.icon = d["icon"]
+    row.content = d["content"]
+    row.is_active = True
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    return {"platform": row.platform, "reset": True}

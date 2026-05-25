@@ -104,6 +104,7 @@ class ContentWriter:
         market: str = "us",
         article_type: Optional[str] = None,
         products: Optional[list] = None,
+        platform_guideline: str = "",
     ) -> tuple[str, str]:
         """Returns (system_prompt, user_prompt)."""
 
@@ -158,6 +159,16 @@ class ContentWriter:
             notes_ctx = (
                 "\n\nUser notes for this specific article — follow these strictly:\n"
                 f"{notes.strip()}"
+            )
+
+        platform_ctx = ""
+        if platform_guideline and platform_guideline.strip():
+            platform_ctx = (
+                "\n\n━━━ PLATFORM-SPECIFIC SEO GUIDELINES — MANDATORY ━━━\n"
+                "Apply the following platform guidelines to this article. "
+                "These rules are authoritative and override generic defaults where they conflict.\n\n"
+                f"{platform_guideline.strip()}\n"
+                "━━━ END PLATFORM GUIDELINES ━━━"
             )
 
         product_ctx = ""
@@ -223,7 +234,7 @@ These must:
 
 Goal: Google must recognize this article as expert-level content covering the FULL semantic field
 of the topic — not exact-match keyword stuffing but rich, interconnected topic coverage.
-━━━ END SEMANTIC KEYWORD SET ━━━{lessons_ctx}{notes_ctx}{kb_context}{product_ctx}"""
+━━━ END SEMANTIC KEYWORD SET ━━━{lessons_ctx}{notes_ctx}{kb_context}{product_ctx}{platform_ctx}"""
 
         user = f"""Write a complete SEO article (do NOT include an H1 — the title is handled by the platform):
 
@@ -269,6 +280,7 @@ Respond in this exact format:
         notes: Optional[str] = None,
         market: str = "us",
         article_type: Optional[str] = None,
+        target_platform: str = "google",
     ) -> dict:
         """Generate SEO article with internal + external links."""
 
@@ -298,6 +310,15 @@ Respond in this exact format:
         if db and shop_domain:
             products = await self._fetch_live_products(db, focus_keyword, shop_domain)
 
+        # Platform-specific guideline
+        platform_guideline = ""
+        if db and target_platform:
+            try:
+                from app.services.platform_guidelines import get_guideline_content
+                platform_guideline = get_guideline_content(target_platform, db)
+            except Exception:
+                pass
+
         system, user = self._build_prompt(
             title, focus_keyword, outline, paa_questions,
             external_refs, internal_posts, language, tone, word_count,
@@ -308,6 +329,7 @@ Respond in this exact format:
             market=market,
             article_type=article_type,
             products=products,
+            platform_guideline=platform_guideline,
         )
 
         message = self.client.chat.completions.create(

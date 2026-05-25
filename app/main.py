@@ -26,6 +26,7 @@ from app.models import knowledge_item as _ki       # ensure knowledge_items tabl
 from app.models import crawl_job as _cj            # ensure crawl_jobs table is registered
 from app.models import system_settings as _ss      # ensure system_settings table is registered
 from app.models import product as _prod            # ensure products table is registered
+from app.models import platform_guideline as _pg   # ensure platform_guidelines table is registered
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,10 @@ async def lifespan(app: FastAPI):
         _bootstrap_superadmin()
     except Exception as e:
         logger.error(f"Superadmin bootstrap failed: {e}", exc_info=True)
+    try:
+        _seed_platform_guidelines()
+    except Exception as e:
+        logger.error(f"Platform guidelines seed failed: {e}", exc_info=True)
     from app.services import scheduler as _sched
     try:
         _sched.start()
@@ -75,6 +80,16 @@ def _bootstrap_superadmin():
     except Exception as e:
         logger.warning(f"Superadmin bootstrap failed: {e}")
         db.rollback()
+    finally:
+        db.close()
+
+
+def _seed_platform_guidelines():
+    from app.database import SessionLocal
+    from app.services.platform_guidelines import seed_platform_guidelines
+    db = SessionLocal()
+    try:
+        seed_platform_guidelines(db)
     finally:
         db.close()
 

@@ -51,6 +51,7 @@ class GenerateArticleRequest(BaseModel):
     notes: Optional[str] = None
     article_type: Optional[str] = None
     platform: Platform = Platform.SHOPIFY
+    target_platform: str = "google"   # SEO platform: google, amazon, etsy, tiktok, bing, youtube
     blog_channel_id: Optional[int] = None
     shop_domain: Optional[str] = None
     auto_publish: bool = False
