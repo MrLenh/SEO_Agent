@@ -2318,7 +2318,7 @@ function renderPlanResult(plan) {
                 <ul class="space-y-1">
                   ${(u.recommendations||[]).map(r=>`<li class="text-xs text-gray-600">• ${esc(r)}</li>`).join('')}
                 </ul>
-                ${u.post_id ? `<button class="btn btn-secondary btn-sm mt-2" onclick="S.page='posts';renderPosts()">Open Post →</button>` : ''}
+              ${u.post_id ? `<button class="btn btn-secondary btn-sm mt-2" onclick="openPostForRewrite(${u.post_id},${esc(JSON.stringify(u.recommendations||[]))})">✏️ Open &amp; Rewrite →</button>` : ''}
               </div>`).join('')}
           </div>
         </div>` : ''}
@@ -2335,21 +2335,45 @@ function renderPlanResult(plan) {
                 </div>
                 <div class="text-sm text-indigo-700 mb-1">📌 ${esc(a.suggested_title||'')}</div>
                 <div class="text-xs text-gray-600">${esc(a.reason||'')}</div>
-                <button class="btn btn-primary btn-sm mt-2" onclick="prefillGenerateKw(${JSON.stringify(esc(a.keyword))},${JSON.stringify(esc(a.suggested_title))})">✍️ Write This Article</button>
+                <button class="btn btn-primary btn-sm mt-2" onclick="prefillGenerateKw(${esc(JSON.stringify(a.keyword))},${esc(JSON.stringify(a.suggested_title))})">✍️ Write This Article</button>
               </div>`).join('')}
           </div>
         </div>` : ''}
     </div>`
 }
 
-function prefillGenerateKw(keyword, title) {
+async function prefillGenerateKw(keyword, title) {
   nav('generate')
-  setTimeout(() => {
+  // renderGenerate is async (fetches brands) — poll until fields exist
+  for (let i = 0; i < 30; i++) {
     const kw = document.getElementById('gen-kw')
     const ti = document.getElementById('gen-title')
-    if (kw) kw.value = keyword || ''
-    if (ti) ti.value = title || ''
-  }, 100)
+    if (kw && ti) {
+      kw.value = keyword || ''
+      ti.value = title || ''
+      kw.focus()
+      return
+    }
+    await new Promise(r => setTimeout(r, 100))
+  }
+}
+
+async function openPostForRewrite(postId, recommendations) {
+  // Open the post modal and pre-fill rewrite textarea with plan recommendations
+  await viewPost(postId)
+  const ta = document.getElementById('rw-instructions')
+  if (!ta) return
+  if (Array.isArray(recommendations) && recommendations.length) {
+    ta.value = recommendations.map(r => '• ' + r).join('\n')
+    ta.focus()
+    // Scroll rewrite section into view
+    const sec = document.getElementById('rewrite-section')
+    if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    // Flash highlight so user sees it was pre-filled
+    ta.style.transition = 'background 0.4s'
+    ta.style.background = '#eff6ff'
+    setTimeout(() => { ta.style.background = '' }, 1200)
+  }
 }
 
 // ════════════════════ KEYWORD SUGGESTIONS TAB ════════════════
