@@ -27,100 +27,88 @@ def create_tables():
 
 
 def _migrate_columns():
-    """Idempotent ALTER TABLE for columns added after initial deployment."""
+    """Idempotent ALTER TABLE for columns added after initial deployment.
+
+    Each table is migrated in its own transaction so a failure on one table
+    never blocks migrations for other tables.
+    """
     is_sqlite = "sqlite" in str(engine.url)
 
     def add_cols(table: str, cols: list[tuple[str, str]]):
-        if table not in inspector.get_table_names():
-            return
-        existing = {c["name"] for c in inspector.get_columns(table)}
-        for col, col_type in cols:
-            if col not in existing:
-                if is_sqlite:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-                else:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type}"))
+        """Add missing columns to *table* in an isolated transaction."""
+        try:
+            with engine.begin() as conn:
+                inspector = inspect(conn)
+                if table not in inspector.get_table_names():
+                    return
+                existing = {c["name"] for c in inspector.get_columns(table)}
+                for col, col_type in cols:
+                    if col not in existing:
+                        if is_sqlite:
+                            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+                        else:
+                            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type}"))
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Migration skipped for %s: %s", table, exc)
 
-    with engine.begin() as conn:
-        inspector = inspect(engine)
+    add_cols("blog_posts", [
+        ("image_prompt",        "TEXT"),
+        ("extra_images",        "TEXT"),
+        ("shop_domain",         "VARCHAR(255)"),
+        ("scheduled_at",        "TIMESTAMP"),
+        ("scheduled_blog_id",   "VARCHAR(100)"),
+        ("semantic_keywords",   "TEXT"),
+    ])
 
-        add_cols("blog_posts", [
-            ("image_prompt",        "TEXT"),
-            ("extra_images",        "TEXT"),
-            ("shop_domain",         "VARCHAR(255)"),
-            ("scheduled_at",        "TIMESTAMP"),
-            ("scheduled_blog_id",   "VARCHAR(100)"),
-            ("semantic_keywords",   "TEXT"),
-        ])
+    add_cols("brand_profiles", [
+        ("gsc_site_url",      "VARCHAR(512)"),
+        ("gsc_refresh_token", "TEXT"),
+        ("writing_notes",     "TEXT"),
+        ("shared_user_ids",   "TEXT"),
+    ])
 
-        # platform_guidelines table is created by SQLAlchemy create_all;
-        # this block handles the case where it was added after initial deployment.
-        if "platform_guidelines" not in inspector.get_table_names():
-            conn.execute(text("""
-                CREATE TABLE platform_guidelines (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    platform VARCHAR(50) NOT NULL UNIQUE,
-                    display_name VARCHAR(100) NOT NULL,
-                    icon VARCHAR(10) DEFAULT '🔍',
-                    content TEXT NOT NULL,
-                    is_active BOOLEAN DEFAULT 1,
-                    updated_at TIMESTAMP
-                )
-            """) if is_sqlite else text("""
-                CREATE TABLE IF NOT EXISTS platform_guidelines (
-                    id SERIAL PRIMARY KEY,
-                    platform VARCHAR(50) NOT NULL UNIQUE,
-                    display_name VARCHAR(100) NOT NULL,
-                    icon VARCHAR(10) DEFAULT '🔍',
-                    content TEXT NOT NULL,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    updated_at TIMESTAMP
-                )
-            """))
+    add_cols("article_feedback", [
+        ("shop_domain", "VARCHAR(255)"),
+    ])
 
-        add_cols("brand_profiles", [
-            ("gsc_site_url",      "VARCHAR(512)"),
-            ("gsc_refresh_token", "TEXT"),
-            ("writing_notes",     "TEXT"),
-            ("shared_user_ids",   "TEXT"),
-        ])
+    add_cols("users", [
+        ("can_access_kb", "BOOLEAN DEFAULT FALSE"),
+    ])
 
-        add_cols("article_feedback", [
-            ("shop_domain", "VARCHAR(255)"),
-        ])
+    add_cols("blog_posts", [
+        ("shop_domain", "VARCHAR(255)"),
+    ])
 
-        add_cols("users", [
-            ("can_access_kb", "BOOLEAN DEFAULT FALSE"),
-        ])
+    add_cols("blog_channels", [
+        ("shop_domain", "VARCHAR(255)"),
+    ])
 
-        add_cols("blog_posts", [
-            ("shop_domain", "VARCHAR(255)"),
-        ])
+    add_cols("products", [
+        ("notes", "TEXT"),
+    ])
 
-        add_cols("blog_channels", [
-            ("shop_domain", "VARCHAR(255)"),
-        ])
+    add_cols("topic_clusters", [
+        ("plan_json", "TEXT"),
+    ])
 
-        add_cols("products", [
-            ("notes", "TEXT"),
-        ])
+    add_cols("keywords", [
+        ("topic_cluster_id", "INTEGER"),
+    ])
 
-        add_cols("topic_clusters", [
-            ("plan_json", "TEXT"),
-        ])
-
-        add_cols("keywords", [
-            ("topic_cluster_id", "INTEGER"),
-        ])
-
-        _backfill_shop_domain(conn)
+    try:
+        with engine.begin() as conn:
+            _backfill_shop_domain(conn)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("shop_domain backfill skipped: %s", exc)
 
 
 def _backfill_shop_domain(conn):
     """Derive shop_domain from platform_url for rows added before scoping."""
     from urllib.parse import urlparse
 
-    tables = set(inspect(conn).get_table_names())
+    tables = set(inspect(conn).get_table_names())  # type: ignore[arg-type]
     if "blog_posts" not in tables or "blog_channels" not in tables:
         return
 
