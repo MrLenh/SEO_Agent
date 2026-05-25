@@ -48,7 +48,7 @@ def _migrate_columns():
             ("image_prompt",        "TEXT"),
             ("extra_images",        "TEXT"),
             ("shop_domain",         "VARCHAR(255)"),
-            ("scheduled_at",        "DATETIME"),
+            ("scheduled_at",        "TIMESTAMP"),
             ("scheduled_blog_id",   "VARCHAR(100)"),
         ])
 
