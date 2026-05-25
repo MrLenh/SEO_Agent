@@ -3140,114 +3140,134 @@ async function kbAnalyzeRankings() {
 // ══════════════════════ BRAND PROFILE ════════════════════════
 // ═══════════════════ PRODUCTS KB ════════════════════════
 
-let _prodSearch = '', _prodType = '', _prodPage = 1
-
 async function renderProducts() {
-  document.getElementById('header-actions').innerHTML = `
-    <button class="btn btn-primary btn-sm" onclick="syncProducts()">🔄 Sync Products from Shopify</button>`
-
+  document.getElementById('header-actions').innerHTML = ''
   document.getElementById('content').innerHTML = `
-    <div class="card mb-4">
-      <div class="flex gap-3 flex-wrap">
-        <input type="text" id="prod-search" placeholder="Search products…" style="flex:1;min-width:180px"
-          value="${esc(_prodSearch)}" onkeyup="if(event.key==='Enter'){_prodSearch=this.value;_prodPage=1;loadProducts()}">
-        <select id="prod-type" style="width:180px" onchange="_prodType=this.value;_prodPage=1;loadProducts()">
-          <option value="">All types</option>
-        </select>
-        <button class="btn btn-secondary btn-sm" onclick="_prodSearch=document.getElementById('prod-search').value;_prodPage=1;loadProducts()">Search</button>
+    <div class="grid gap-4" style="grid-template-columns:1fr 1fr">
+
+      <!-- Search & add -->
+      <div class="card">
+        <div class="text-sm font-semibold text-gray-700 mb-3">🔍 Find products to track</div>
+        <p class="text-xs text-gray-400 mb-3">Search Shopify live — full product data is always fetched fresh from Shopify when generating articles.</p>
+        <div class="flex gap-2 mb-3">
+          <input type="text" id="prod-kw" placeholder="Search keyword…" style="flex:1"
+            onkeyup="if(event.key==='Enter')searchLiveProducts()">
+          <button class="btn btn-primary btn-sm" onclick="searchLiveProducts()">Search</button>
+        </div>
+        <div id="prod-search-results" class="space-y-2 max-h-96 overflow-y-auto"></div>
       </div>
-    </div>
 
-    <div id="prod-info" class="text-xs text-gray-400 mb-2"></div>
-    <div id="prod-grid" class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr))">${skeletons(6)}</div>
-    <div id="prod-pager" class="flex justify-between items-center mt-4 text-sm text-gray-500"></div>`
+      <!-- Tracked list -->
+      <div class="card">
+        <div class="text-sm font-semibold text-gray-700 mb-1">📌 Tracked Products <span id="prod-count" class="text-gray-400 font-normal"></span></div>
+        <p class="text-xs text-gray-400 mb-3">Products tracked for SEO ranking. Only identification is stored locally.</p>
+        <div id="prod-tracked-list">${skeletons(4)}</div>
+      </div>
+    </div>`
 
-  loadProducts()
-  loadProductTypes()
+  loadTrackedProducts()
 }
 
-async function loadProductTypes() {
+async function searchLiveProducts() {
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  const kw = document.getElementById('prod-kw')?.value.trim()
+  if (!kw) return
+  const el = document.getElementById('prod-search-results')
+  if (el) el.innerHTML = `<div class="text-xs text-gray-400">${skeletons(3)}</div>`
   try {
-    const sp = S.currentShop ? `?shop_domain=${encodeURIComponent(S.currentShop)}` : ''
-    const types = await GET(`/api/v1/products/types${sp}`)
-    const sel = document.getElementById('prod-type')
-    if (!sel) return
-    const cur = _prodType
-    sel.innerHTML = `<option value="">All types</option>` +
-      types.map(t => `<option value="${esc(t)}" ${t===cur?'selected':''}>${esc(t)}</option>`).join('')
-  } catch {}
-}
-
-async function loadProducts() {
-  const q = new URLSearchParams({
-    page: _prodPage, limit: 24,
-    ...(_prodSearch && { search: _prodSearch }),
-    ...(_prodType   && { product_type: _prodType }),
-    ...(S.currentShop && { shop_domain: S.currentShop }),
-  })
-  const grid = document.getElementById('prod-grid')
-  const info = document.getElementById('prod-info')
-  if (grid) grid.innerHTML = skeletons(6)
-  try {
-    const r = await GET(`/api/v1/products/?${q}`)
-    const items = r.items || []
-    const total = r.total || 0
-    const totalPages = Math.ceil(total / 24) || 1
-
-    if (info) info.textContent = `${total} product${total===1?'':'s'} in KB`
-
-    if (!grid) return
-    if (!items.length) {
-      grid.innerHTML = `<div class="col-span-full text-center text-gray-400 py-12 text-sm">
-        No products found. <button class="text-indigo-500 underline" onclick="syncProducts()">Sync from Shopify →</button>
-      </div>`
-    } else {
-      grid.innerHTML = items.map(p => `
-        <div class="card hover:shadow-md transition-shadow cursor-pointer" onclick="viewProduct(${p.id})">
-          ${p.featured_image_url
-            ? `<img src="${esc(p.featured_image_url)}" alt="${esc(p.title)}" class="w-full rounded-lg mb-3 object-cover" style="height:140px">`
-            : `<div class="w-full rounded-lg mb-3 bg-gray-100 flex items-center justify-center text-3xl" style="height:140px">🛍</div>`}
-          <div class="font-medium text-gray-800 text-sm truncate" title="${esc(p.title)}">${esc(p.title)}</div>
-          ${p.product_type ? `<div class="text-xs text-indigo-500 mt-0.5">${esc(p.product_type)}</div>` : ''}
-          <div class="flex items-center justify-between mt-2">
-            <span class="text-xs text-gray-400">${p.vendor ? esc(p.vendor) : '—'}</span>
-            ${p.price_min != null ? `<span class="text-sm font-semibold text-gray-700">${p.currency} ${p.price_min.toFixed(0)}</span>` : ''}
-          </div>
-          ${(p.tags||[]).length
-            ? `<div class="flex flex-wrap gap-1 mt-2">${p.tags.slice(0,4).map(t=>`<span class="badge badge-gray text-xs">${esc(t)}</span>`).join('')}</div>`
-            : ''}
-          ${p.platform_url ? `<a href="${esc(p.platform_url)}" target="_blank" class="text-xs text-indigo-400 hover:underline mt-2 block">View on store ↗</a>` : ''}
-        </div>`).join('')
+    const results = await POST('/api/v1/products/search', { shop_domain: S.currentShop, keyword: kw, limit: 10 })
+    if (!el) return
+    if (!results.length) {
+      el.innerHTML = `<div class="text-xs text-gray-400 py-4 text-center">No products found for "${esc(kw)}"</div>`
+      return
     }
-
-    const pager = document.getElementById('prod-pager')
-    if (pager) {
-      pager.innerHTML = total > 24 ? `
-        <span>Page ${_prodPage} / ${totalPages}</span>
-        <div class="flex gap-2">
-          <button class="btn btn-secondary btn-sm" ${_prodPage<=1?'disabled':''} onclick="_prodPage--;loadProducts()">← Prev</button>
-          <button class="btn btn-secondary btn-sm" ${_prodPage>=totalPages?'disabled':''} onclick="_prodPage++;loadProducts()">Next →</button>
-        </div>` : ''
-    }
+    el.innerHTML = results.map(p => `
+      <div class="flex items-start gap-3 p-3 border border-gray-100 rounded-xl hover:bg-gray-50">
+        ${p.featured_image_url
+          ? `<img src="${esc(p.featured_image_url)}" class="w-12 h-12 rounded-lg object-cover shrink-0">`
+          : `<div class="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-xl shrink-0">🛍</div>`}
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-medium text-gray-800 truncate">${esc(p.title)}</div>
+          <div class="text-xs text-gray-400">${p.product_type ? esc(p.product_type)+' · ' : ''}${p.price_min != null ? p.currency+' '+p.price_min.toFixed(0) : ''}</div>
+          <a href="${esc(p.platform_url||'#')}" target="_blank" class="text-xs text-indigo-400 hover:underline">/products/${esc(p.handle)}</a>
+        </div>
+        ${p.tracked
+          ? `<span class="badge badge-green text-xs shrink-0">Tracked</span>`
+          : `<button class="btn btn-primary btn-sm shrink-0" onclick="trackProduct(${JSON.stringify(p).replace(/"/g,'&quot;')})">+ Track</button>`}
+      </div>`).join('')
   } catch(e) {
-    if (grid) grid.innerHTML = `<div class="col-span-full text-red-400 text-sm py-8 text-center">Error: ${esc(e.message)}</div>`
+    if (el) el.innerHTML = `<div class="text-xs text-red-400">${esc(e.message)}</div>`
   }
 }
 
-async function syncProducts() {
-  if (!S.currentShop) { toast('Select a store first', 'error'); return }
-  toast('Syncing products…', 'info')
+async function trackProduct(p) {
+  if (!S.currentShop) return
   try {
-    const r = await POST(`/api/v1/products/sync?shop_domain=${encodeURIComponent(S.currentShop)}`)
-    toast(`✅ Synced ${r.synced} new, updated ${r.updated} products`, 'success')
-    loadProducts()
-    loadProductTypes()
-  } catch(e) { toast('Sync failed: ' + e.message, 'error') }
+    await POST('/api/v1/products/track', {
+      shop_domain: S.currentShop,
+      platform_id: p.platform_id,
+      handle: p.handle,
+      title: p.title,
+      product_type: p.product_type || null,
+      platform_url: p.platform_url || null,
+    })
+    toast(`✅ Now tracking: ${p.title}`, 'success')
+    loadTrackedProducts()
+    searchLiveProducts()  // refresh tracked badges
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
 }
 
-function viewProduct(id) {
-  // find from current loaded items or open store URL
-  toast('Open store URL to view product details', 'info')
+async function loadTrackedProducts() {
+  const el = document.getElementById('prod-tracked-list')
+  const cnt = document.getElementById('prod-count')
+  if (!el) return
+  try {
+    const q = new URLSearchParams({ limit: 100, ...(S.currentShop && { shop_domain: S.currentShop }) })
+    const r = await GET(`/api/v1/products/?${q}`)
+    const items = r.items || []
+    if (cnt) cnt.textContent = `(${items.length})`
+    if (!items.length) {
+      el.innerHTML = `<div class="text-xs text-gray-400 py-6 text-center">No products tracked yet.<br>Search and add products on the left.</div>`
+      return
+    }
+    el.innerHTML = items.map(p => `
+      <div class="flex items-center gap-3 py-2.5 border-b border-gray-50 last:border-0">
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-medium text-gray-800 truncate">${esc(p.title)}</div>
+          <div class="flex items-center gap-2 mt-0.5">
+            ${p.product_type ? `<span class="text-xs text-indigo-400">${esc(p.product_type)}</span>` : ''}
+            ${p.platform_url ? `<a href="${esc(p.platform_url)}" target="_blank" class="text-xs text-gray-400 hover:underline">/products/${esc(p.handle)}</a>` : ''}
+          </div>
+          ${p.notes ? `<div class="text-xs text-gray-400 mt-0.5 italic">${esc(p.notes)}</div>` : ''}
+        </div>
+        <span class="badge ${p.status==='paused'?'badge-gray':'badge-green'} text-xs shrink-0">${p.status}</span>
+        <div class="flex gap-1 shrink-0">
+          <button class="text-xs text-gray-400 hover:text-amber-500" title="${p.status==='tracked'?'Pause':'Resume'}"
+            onclick="toggleTrackedStatus(${p.id},'${p.status==='tracked'?'paused':'tracked'}')">
+            ${p.status==='tracked'?'⏸':'▶'}
+          </button>
+          <button class="text-xs text-gray-400 hover:text-red-500" onclick="untrackProduct(${p.id})" title="Stop tracking">✕</button>
+        </div>
+      </div>`).join('')
+  } catch(e) {
+    if (el) el.innerHTML = `<div class="text-xs text-red-400">${esc(e.message)}</div>`
+  }
+}
+
+async function toggleTrackedStatus(id, newStatus) {
+  try {
+    await api('PATCH', `/api/v1/products/${id}`, { status: newStatus })
+    loadTrackedProducts()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function untrackProduct(id) {
+  if (!confirm('Stop tracking this product?')) return
+  try {
+    await DEL(`/api/v1/products/${id}`)
+    toast('Removed from tracking', 'success')
+    loadTrackedProducts()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
 }
 
 // ═══════════════════ BRAND PROFILE ════════════════════════
@@ -3517,7 +3537,7 @@ async function loadUsersTable() {
                 </td>
                 <td class="py-3 px-3">
                   <div class="flex gap-1 action-btns flex-wrap">
-                    <button class="btn btn-secondary btn-sm" onclick="openPermModal(${u.id},'${esc(u.name)}',${JSON.stringify(u.store_permissions||[])})">🔑 Permissions</button>
+                    <button class="btn btn-secondary btn-sm" onclick="openPermModal(${u.id},'${esc(u.name)}',${esc(JSON.stringify(u.store_permissions||[]))})">🔑 Permissions</button>
                     <button class="btn btn-secondary btn-sm" onclick="toggleUserActive(${u.id},${!u.is_active})">${u.is_active?'Disable':'Enable'}</button>
                     ${u.role !== 'admin' ? `<button class="btn btn-sm" style="${u.can_access_kb?'background:#dcfce7;color:#166534':'background:#f3f4f6;color:#374151'}" title="${u.can_access_kb?'Revoke KB access':'Grant KB access'}" onclick="toggleKbAccess(${u.id})">${u.can_access_kb?'🧠 KB ✓':'🧠 KB'}</button>` : ''}
                     ${u.id !== S.user?.id ? `<button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${esc(u.name)}')">×</button>` : ''}

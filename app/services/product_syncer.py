@@ -1,19 +1,22 @@
-"""Sync Shopify products into the local DB for AI content context."""
+"""
+Live Shopify product fetcher — NO local sync.
+
+Products are fetched directly from the Shopify Admin GraphQL API at
+article-generation time so data is always current (price, description,
+availability).  The local `products` table is only a lightweight tracking
+registry (which products to monitor for SEO ranking).
+"""
 import asyncio
-from datetime import datetime
-from typing import AsyncGenerator
+from typing import Optional
 
 import httpx
-from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models.product import Product
 
 
-_PRODUCTS_QUERY = """
-query Products($first: Int!, $after: String) {
-  products(first: $first, after: $after) {
-    pageInfo { hasNextPage endCursor }
+_SEARCH_QUERY = """
+query SearchProducts($query: String!, $first: Int!) {
+  products(first: $first, query: $query) {
     nodes {
       id title handle descriptionHtml vendor productType tags status
       seo { title description }
@@ -27,128 +30,121 @@ query Products($first: Int!, $after: String) {
 }
 """
 
+_BY_ID_QUERY = """
+query ProductById($id: ID!) {
+  product(id: $id) {
+    id title handle descriptionHtml vendor productType tags status
+    seo { title description }
+    featuredImage { url altText }
+    priceRangeV2 {
+      minVariantPrice { amount currencyCode }
+    }
+    onlineStoreUrl
+  }
+}
+"""
 
-class ProductSyncer:
-    RATE_LIMIT_DELAY = 0.5
 
-    def __init__(self, shop_domain: str, access_token: str):
-        self.shop_domain = shop_domain.strip().rstrip("/")
-        self.access_token = access_token
-        self.api_version = settings.SHOPIFY_API_VERSION
-        self.endpoint = f"https://{self.shop_domain}/admin/api/{self.api_version}/graphql.json"
+def _gid(numeric_id: str) -> str:
+    return f"gid://shopify/Blog/{numeric_id}"
 
-    def _headers(self) -> dict:
-        return {
-            "X-Shopify-Access-Token": self.access_token,
-            "Content-Type": "application/json",
-        }
 
-    async def _gql(self, query: str, variables: dict = None) -> dict:
-        async with httpx.AsyncClient(headers=self._headers(), timeout=30.0) as client:
-            resp = await client.post(
-                self.endpoint,
-                json={"query": query, "variables": variables or {}},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            if errors := data.get("errors"):
-                raise ValueError(str(errors[0].get("message", errors)))
-            await asyncio.sleep(self.RATE_LIMIT_DELAY)
-            return data["data"]
+def _parse_node(node: dict, shop_domain: str) -> dict:
+    gid = node.get("id", "")
+    numeric_id = gid.rsplit("/", 1)[-1] if "/" in gid else gid
+    handle = node.get("handle", "")
+    seo = node.get("seo") or {}
+    price_obj = ((node.get("priceRangeV2") or {}).get("minVariantPrice") or {})
+    image = node.get("featuredImage") or {}
 
-    @staticmethod
-    def _gid_to_id(gid: str) -> str:
-        return gid.rsplit("/", 1)[-1]
-
-    @staticmethod
-    def _strip_html(html: str) -> str:
-        """Extract plain text from HTML for AI context (max 2000 chars)."""
-        if not html:
-            return ""
+    desc_html = node.get("descriptionHtml") or ""
+    desc_text = ""
+    if desc_html:
         try:
             from bs4 import BeautifulSoup
-            return BeautifulSoup(html, "lxml").get_text(separator=" ", strip=True)[:2000]
+            desc_text = BeautifulSoup(desc_html, "lxml").get_text(" ", strip=True)[:1500]
         except Exception:
             import re
-            return re.sub(r"<[^>]+>", " ", html).strip()[:2000]
+            desc_text = re.sub(r"<[^>]+>", " ", desc_html).strip()[:1500]
 
-    async def iter_products(self) -> AsyncGenerator[dict, None]:
-        cursor = None
-        while True:
-            data = await self._gql(_PRODUCTS_QUERY, {"first": 50, "after": cursor})
-            page = data["products"]
-            for node in page["nodes"]:
-                yield node
-            if not page["pageInfo"]["hasNextPage"]:
-                break
-            cursor = page["pageInfo"]["endCursor"]
+    return {
+        "platform_id": numeric_id,
+        "title": node.get("title", ""),
+        "handle": handle,
+        "description_text": desc_text,
+        "vendor": node.get("vendor"),
+        "product_type": node.get("productType") or None,
+        "tags": node.get("tags") or [],
+        "status": (node.get("status") or "ACTIVE").lower(),
+        "price_min": float(price_obj["amount"]) if price_obj.get("amount") else None,
+        "currency": price_obj.get("currencyCode", "USD"),
+        "featured_image_url": image.get("url"),
+        "featured_image_alt": image.get("altText"),
+        "platform_url": (
+            node.get("onlineStoreUrl")
+            or f"https://{shop_domain}/products/{handle}"
+        ),
+        "seo_title": seo.get("title"),
+        "seo_description": seo.get("description"),
+    }
 
-    def _parse_product(self, node: dict) -> dict:
-        numeric_id = self._gid_to_id(node["id"])
-        handle = node.get("handle", "")
-        seo = node.get("seo") or {}
-        price_range = node.get("priceRangeV2") or {}
-        min_price_obj = (price_range.get("minVariantPrice") or {})
-        image = node.get("featuredImage") or {}
-        desc_html = node.get("descriptionHtml") or ""
 
-        return {
-            "shop_domain": self.shop_domain,
-            "platform_id": numeric_id,
-            "title": node.get("title", ""),
-            "handle": handle,
-            "description_html": desc_html,
-            "description_text": self._strip_html(desc_html),
-            "vendor": node.get("vendor"),
-            "product_type": node.get("productType") or None,
-            "tags": node.get("tags") or [],
-            "status": (node.get("status") or "ACTIVE").lower(),
-            "price_min": float(min_price_obj["amount"]) if min_price_obj.get("amount") else None,
-            "currency": min_price_obj.get("currencyCode", "USD"),
-            "featured_image_url": image.get("url"),
-            "featured_image_alt": image.get("altText"),
-            "platform_url": (
-                node.get("onlineStoreUrl")
-                or f"https://{self.shop_domain}/products/{handle}"
-            ),
-            "seo_title": seo.get("title"),
-            "seo_description": seo.get("description"),
-            "synced_at": datetime.utcnow(),
-        }
+async def _gql(endpoint: str, headers: dict, query: str, variables: dict) -> dict:
+    async with httpx.AsyncClient(headers=headers, timeout=20.0) as client:
+        resp = await client.post(endpoint, json={"query": query, "variables": variables})
+        resp.raise_for_status()
+        data = resp.json()
+        if errors := data.get("errors"):
+            raise ValueError(str(errors[0].get("message", errors)))
+        return data["data"]
 
-    def _upsert(self, db: Session, data: dict) -> tuple[Product, bool]:
-        prod = (
-            db.query(Product)
-            .filter_by(shop_domain=data["shop_domain"], platform_id=data["platform_id"])
-            .first()
-        )
-        if prod:
-            for k, v in data.items():
-                setattr(prod, k, v)
-            return prod, False
-        prod = Product(**data)
-        db.add(prod)
-        return prod, True
 
-    async def sync_all(self, db: Session) -> dict:
-        stats = {"synced": 0, "updated": 0, "skipped": 0, "errors": []}
-        try:
-            async for node in self.iter_products():
-                try:
-                    status = (node.get("status") or "ACTIVE").lower()
-                    if status == "archived":
-                        stats["skipped"] += 1
-                        continue
-                    data = self._parse_product(node)
-                    _, is_new = self._upsert(db, data)
-                    if is_new:
-                        stats["synced"] += 1
-                    else:
-                        stats["updated"] += 1
-                except Exception as e:
-                    stats["errors"].append(f"{node.get('id')}: {e}")
-            db.commit()
-        except Exception as e:
-            stats["errors"].append(f"Fatal: {e}")
-            db.rollback()
-        return stats
+async def fetch_products_for_keyword(
+    shop_domain: str,
+    access_token: str,
+    keyword: str,
+    limit: int = 8,
+    api_version: Optional[str] = None,
+) -> list[dict]:
+    """
+    Query Shopify live for products matching `keyword`.
+    Returns parsed product dicts with fresh data — never reads local DB.
+    Used by content_writer when generating articles.
+    """
+    version = api_version or settings.SHOPIFY_API_VERSION
+    endpoint = f"https://{shop_domain}/admin/api/{version}/graphql.json"
+    headers = {
+        "X-Shopify-Access-Token": access_token,
+        "Content-Type": "application/json",
+    }
+    try:
+        data = await _gql(endpoint, headers, _SEARCH_QUERY, {
+            "query": keyword,
+            "first": limit,
+        })
+        nodes = data.get("products", {}).get("nodes") or []
+        return [_parse_node(n, shop_domain) for n in nodes if n.get("status", "ACTIVE").lower() != "archived"]
+    except Exception:
+        return []
+
+
+async def fetch_product_by_id(
+    shop_domain: str,
+    access_token: str,
+    platform_id: str,
+    api_version: Optional[str] = None,
+) -> Optional[dict]:
+    """Fetch a single tracked product by its Shopify numeric ID."""
+    version = api_version or settings.SHOPIFY_API_VERSION
+    endpoint = f"https://{shop_domain}/admin/api/{version}/graphql.json"
+    headers = {
+        "X-Shopify-Access-Token": access_token,
+        "Content-Type": "application/json",
+    }
+    try:
+        gid = f"gid://shopify/Product/{platform_id}"
+        data = await _gql(endpoint, headers, _BY_ID_QUERY, {"id": gid})
+        node = data.get("product")
+        return _parse_node(node, shop_domain) if node else None
+    except Exception:
+        return None

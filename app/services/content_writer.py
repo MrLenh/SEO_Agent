@@ -20,41 +20,30 @@ class ContentWriter:
 
     # ── Product helpers ───────────────────────────────────────────────────────
 
-    def _find_relevant_products(
+    async def _fetch_live_products(
         self,
         db: Session,
         focus_keyword: str,
         shop_domain: str,
-        limit: int = 6,
-    ) -> list:
-        """Return store products most relevant to the focus keyword."""
+        limit: int = 8,
+    ) -> list[dict]:
+        """
+        Fetch fresh product data from Shopify at generation time.
+        No local DB read — always up-to-date price, description, availability.
+        Returns [] silently on any error (product context is optional).
+        """
         try:
-            from app.models.product import Product
-            products = (
-                db.query(Product)
-                .filter(Product.shop_domain == shop_domain, Product.status == "active")
-                .limit(300)
-                .all()
+            from app.models.shopify_store import ShopifyStore
+            store = db.query(ShopifyStore).filter_by(shop_domain=shop_domain).first()
+            if not store or not store.access_token:
+                return []
+            from app.services.product_syncer import fetch_products_for_keyword
+            return await fetch_products_for_keyword(
+                shop_domain=shop_domain,
+                access_token=store.access_token,
+                keyword=focus_keyword,
+                limit=limit,
             )
-            kw_words = set(focus_keyword.lower().split())
-            scored = []
-            for p in products:
-                score = 0
-                title_words = set((p.title or "").lower().split())
-                tags_lower = [t.lower() for t in (p.tags or [])]
-                ptype = (p.product_type or "").lower()
-
-                overlap = kw_words & title_words
-                score += len(overlap) * 3
-                if any(focus_keyword.lower() in t or t in focus_keyword.lower() for t in tags_lower):
-                    score += 3
-                if ptype and (ptype in focus_keyword.lower() or focus_keyword.lower() in ptype):
-                    score += 2
-                if score > 0:
-                    scored.append((score, p))
-
-            scored.sort(key=lambda x: x[0], reverse=True)
-            return [p for _, p in scored[:limit]]
         except Exception:
             return []
 
@@ -273,10 +262,10 @@ Respond in this exact format:
             except Exception:
                 pass
 
-        # Relevant products for internal linking + recommendations
+        # Fetch live product data from Shopify (always fresh — never from local cache)
         products = []
         if db and shop_domain:
-            products = self._find_relevant_products(db, focus_keyword, shop_domain)
+            products = await self._fetch_live_products(db, focus_keyword, shop_domain)
 
         system, user = self._build_prompt(
             title, focus_keyword, outline, paa_questions,
