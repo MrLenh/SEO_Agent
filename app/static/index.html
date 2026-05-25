@@ -333,10 +333,11 @@ async function renderDashboard() {
   // Load post stats + recent posts
   try {
     const sp = S.currentShop ? `&shop_domain=${encodeURIComponent(S.currentShop)}` : ''
-    const [posts, clusters] = await Promise.all([
+    const [postsResp, clusters] = await Promise.all([
       GET(`/api/v1/blogs/?limit=10&page=1${sp}`),
       GET('/api/v1/topics/?limit=100'),
     ])
+    const posts = (postsResp && postsResp.items) ? postsResp.items : (Array.isArray(postsResp) ? postsResp : [])
     const published = posts.filter(p => p.status === 'published').length
     const drafts    = posts.filter(p => p.status === 'draft').length
 
