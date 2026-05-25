@@ -117,6 +117,7 @@ def list_cluster_keywords(cluster_id: int, db: Session = Depends(get_db)):
             "prev_rank": k.prev_rank,
             "volume": k.volume,
             "difficulty": k.difficulty,
+            "cpc": k.cpc,
             "country": k.country,
             "language": k.language,
             "status": k.status,
@@ -127,14 +128,15 @@ def list_cluster_keywords(cluster_id: int, db: Session = Depends(get_db)):
 
 
 @topics_router.post("/{cluster_id}/keywords")
-def add_cluster_keyword(cluster_id: int, body: _AddKeywordBody, db: Session = Depends(get_db)):
+async def add_cluster_keyword(cluster_id: int, body: _AddKeywordBody, db: Session = Depends(get_db)):
     from app.models.keyword import Keyword, KeywordStatus
     if not db.query(TopicCluster).filter(TopicCluster.id == cluster_id).first():
         raise HTTPException(404, "Cluster not found")
     kw_text = body.keyword.strip()
     existing = db.query(Keyword).filter_by(topic_cluster_id=cluster_id, keyword=kw_text).first()
     if existing:
-        return {"id": existing.id, "keyword": existing.keyword, "already_exists": True}
+        return {"id": existing.id, "keyword": existing.keyword, "volume": existing.volume,
+                "cpc": existing.cpc, "already_exists": True}
     kw = Keyword(
         keyword=kw_text,
         topic_cluster_id=cluster_id,
@@ -145,7 +147,50 @@ def add_cluster_keyword(cluster_id: int, body: _AddKeywordBody, db: Session = De
     db.add(kw)
     db.commit()
     db.refresh(kw)
-    return {"id": kw.id, "keyword": kw.keyword, "country": kw.country, "language": kw.language}
+
+    # Auto-fetch search volume from DataForSEO if configured
+    from app.services.volume_service import get_search_volumes
+    lang = (body.language or "en")[:2].lower()
+    vol_data = await get_search_volumes([kw_text], language_code=lang)
+    if vol_data.get(kw_text):
+        v = vol_data[kw_text]
+        kw.volume = v.get("volume")
+        kw.difficulty = round((v.get("competition") or 0) * 100, 1)  # 0–100 scale
+        kw.cpc = v.get("cpc")
+        db.commit()
+        db.refresh(kw)
+
+    return {
+        "id": kw.id, "keyword": kw.keyword,
+        "country": kw.country, "language": kw.language,
+        "volume": kw.volume, "difficulty": kw.difficulty, "cpc": kw.cpc,
+    }
+
+
+class _PatchKeywordBody(_PydBase):
+    volume: Optional[int] = None
+    difficulty: Optional[float] = None
+    cpc: Optional[float] = None
+    current_rank: Optional[int] = None
+
+
+@topics_router.patch("/{cluster_id}/keywords/{kw_id}")
+def update_cluster_keyword(cluster_id: int, kw_id: int, body: _PatchKeywordBody, db: Session = Depends(get_db)):
+    from app.models.keyword import Keyword
+    kw = db.query(Keyword).filter_by(id=kw_id, topic_cluster_id=cluster_id).first()
+    if not kw:
+        raise HTTPException(404, "Keyword not found")
+    if body.volume is not None:
+        kw.volume = body.volume
+    if body.difficulty is not None:
+        kw.difficulty = body.difficulty
+    if body.cpc is not None:
+        kw.cpc = body.cpc
+    if body.current_rank is not None:
+        kw.prev_rank = kw.current_rank
+        kw.current_rank = body.current_rank
+    db.commit()
+    return {"id": kw.id, "keyword": kw.keyword, "volume": kw.volume, "cpc": kw.cpc, "difficulty": kw.difficulty}
 
 
 @topics_router.delete("/{cluster_id}/keywords/{kw_id}")

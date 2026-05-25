@@ -74,6 +74,25 @@ async def check_rankings(body: RankingsRequest, db: Session = Depends(get_db)):
     return {"shop": shop, "results": ranking + not_ranking}
 
 
+class VolumeRequest(BaseModel):
+    keywords: List[str]
+    language_code: str = "en"
+    location_code: int = 2840
+
+
+@audit_router.post("/volume")
+async def get_keyword_volumes(body: VolumeRequest, user=Depends(get_current_user)):
+    """Fetch monthly search volume for a list of keywords via DataForSEO."""
+    from app.services.volume_service import get_search_volumes
+    kws = [k.strip() for k in body.keywords if k.strip()]
+    if not kws:
+        raise HTTPException(422, "Provide at least one keyword")
+    data = await get_search_volumes(kws, body.language_code, body.location_code)
+    if not data and kws:
+        return {"configured": False, "message": "Set DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD to enable search volume.", "results": {}}
+    return {"configured": True, "results": data}
+
+
 class PlanRequest(BaseModel):
     rankings: List[dict]
     shop_domain: Optional[str] = None

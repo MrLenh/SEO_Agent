@@ -1445,6 +1445,7 @@ function renderClusterKeywords(clusterId, kws) {
   panel.innerHTML = `
     <div class="flex items-center justify-between mb-3">
       <div class="text-sm font-semibold text-gray-700">🔍 Tracked Keywords (${kws.length})</div>
+      ${kws.length > 0 ? `<button class="btn btn-secondary btn-sm" onclick="refreshClusterVolume(${clusterId})">📊 Refresh Volume</button>` : ''}
     </div>
     ${kws.length === 0
       ? '<div class="text-xs text-gray-400 mb-3">No keywords tracked yet.</div>'
@@ -1452,14 +1453,16 @@ function renderClusterKeywords(clusterId, kws) {
           <thead><tr class="text-left text-gray-400 text-xs border-b">
             <th class="pb-2">Keyword</th>
             <th class="pb-2 w-20">Rank</th>
-            <th class="pb-2 w-20">Volume</th>
+            <th class="pb-2 w-24">Vol/mo</th>
+            <th class="pb-2 w-16">CPC</th>
             <th class="pb-2 w-16"></th>
           </tr></thead>
           <tbody>${kws.map(k => `
             <tr class="border-b border-gray-50">
               <td class="py-2 text-gray-800">${esc(k.keyword)}</td>
               <td class="py-2">${rankBadge(k.current_rank, k.prev_rank)}</td>
-              <td class="py-2 text-gray-400">${k.volume != null ? k.volume.toLocaleString() : '—'}</td>
+              <td class="py-2 text-gray-600">${k.volume != null ? '<strong>'+k.volume.toLocaleString()+'</strong>' : '<span class="text-gray-300">—</span>'}</td>
+              <td class="py-2 text-gray-400 text-xs">${k.cpc != null ? '$'+k.cpc.toFixed(2) : '<span class="text-gray-300">—</span>'}</td>
               <td class="py-2 text-right">
                 <button class="text-red-400 hover:text-red-600 text-xs" onclick="removeClusterKeyword(${clusterId},${k.id})">✕</button>
               </td>
@@ -1487,6 +1490,29 @@ async function addClusterKeyword(clusterId) {
 async function removeClusterKeyword(clusterId, kwId) {
   try {
     await DEL(`/api/v1/topics/${clusterId}/keywords/${kwId}`)
+    loadClusterKeywords(clusterId)
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function refreshClusterVolume(clusterId) {
+  try {
+    const kws = await GET(`/api/v1/topics/${clusterId}/keywords`)
+    const keywords = kws.map(k => k.keyword)
+    if (!keywords.length) return
+    const res = await POST('/api/v1/audit/volume', { keywords })
+    if (!res.configured) {
+      toast('Set DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD to enable search volume', 'error')
+      return
+    }
+    // Update each keyword via PATCH with new volume data
+    await Promise.all(kws.map(async k => {
+      const v = res.results[k.keyword]
+      if (v) await api('PATCH', `/api/v1/topics/${clusterId}/keywords/${k.id}`, {
+        volume: v.volume, cpc: v.cpc,
+        difficulty: v.competition != null ? Math.round(v.competition * 100) : null,
+      })
+    }))
+    toast('Search volume updated', 'success')
     loadClusterKeywords(clusterId)
   } catch(e) { toast('Failed: ' + e.message, 'error') }
 }
@@ -2100,6 +2126,8 @@ function renderRankingResults(data) {
         <thead><tr class="border-b border-gray-100 text-xs text-gray-500 uppercase">
           <th class="text-left py-2 pr-4">Keyword</th>
           <th class="text-center py-2 px-3">Position</th>
+          <th class="text-right py-2 px-3">Search Vol</th>
+          <th class="text-right py-2 px-3">CPC</th>
           <th class="text-left py-2 px-3">Ranking URL</th>
         </tr></thead>
         <tbody>
@@ -2107,6 +2135,8 @@ function renderRankingResults(data) {
             <tr class="border-b border-gray-50 table-row">
               <td class="py-2.5 pr-4 font-medium text-gray-800">${esc(r.keyword)}</td>
               <td class="text-center py-2.5 px-3">${posBadge(r.position)}</td>
+              <td class="text-right py-2.5 px-3 text-gray-600">${r.volume != null ? r.volume.toLocaleString() : '<span class="text-gray-300">—</span>'}</td>
+              <td class="text-right py-2.5 px-3 text-gray-500 text-xs">${r.cpc != null ? '$'+r.cpc.toFixed(2) : '<span class="text-gray-300">—</span>'}</td>
               <td class="py-2.5 px-3 text-xs text-gray-500 max-w-xs truncate">
                 ${r.ranking_url ? `<a href="${esc(r.ranking_url)}" target="_blank" class="text-indigo-600 hover:underline truncate block">${esc(r.ranking_title||r.ranking_url)}</a>` : '—'}
               </td>
@@ -2114,10 +2144,11 @@ function renderRankingResults(data) {
         </tbody>
       </table>
     </div>
-    <div class="mt-3 flex gap-3 text-xs text-gray-400">
+    <div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-400">
       <span>Ranking: <strong class="text-green-600">${ranking.length}</strong></span>
       <span>Not ranking: <strong class="text-gray-500">${notRanking.length}</strong></span>
       ${ranking.length ? `<span>Best: <strong class="text-blue-600">#${Math.min(...ranking.map(r=>r.position))} for "${ranking.sort((a,b)=>a.position-b.position)[0].keyword}"</strong></span>` : ''}
+      ${results[0]?.volume == null ? '<span class="text-amber-500">Search volume: set DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD to enable</span>' : ''}
     </div>
     ${S.rankingResults ? `<div class="mt-4"><button class="btn btn-primary btn-sm" onclick="S.auditTab='plan';renderAudit()">🎯 Generate Ranking Plan →</button></div>` : ''}`
 }
@@ -2344,9 +2375,45 @@ async function loadGscData() {
       GET(`/api/v1/audit/gsc/queries?days=${S.gscDays}&limit=20${shopParam}`),
       GET(`/api/v1/audit/gsc/opportunities?days=${S.gscDays}${shopParam}`),
     ])
+    S.gscQueries = queries   // store for volume fetch
     renderGscData(overview, pages, queries, opps)
   } catch(e) {
     el.innerHTML = `<div class="text-red-500 text-sm p-4">Error loading GSC data: ${esc(e.message)}</div>`
+  }
+}
+
+async function fetchGscVolume() {
+  const queries = (S.gscQueries || []).map(q => q.query)
+  if (!queries.length) return
+  const btn = document.getElementById('gsc-vol-btn')
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Fetching…' }
+  try {
+    const res = await POST('/api/v1/audit/volume', { keywords: queries })
+    if (!res.configured) {
+      toast('Set DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD to enable search volume', 'error')
+      return
+    }
+    // Show volume header
+    const hdr = document.getElementById('gsc-vol-header')
+    if (hdr) hdr.style.display = ''
+
+    // Update each row: append volume cell
+    const tbody = document.getElementById('gsc-queries-body')
+    if (tbody) {
+      const rows = tbody.querySelectorAll('tr')
+      rows.forEach((row, i) => {
+        const q = queries[i]
+        const v = q && res.results[q]
+        const cell = row.querySelector('td.gsc-vol-cell') || document.createElement('td')
+        cell.className = 'text-right px-2 text-gray-600 gsc-vol-cell'
+        cell.innerHTML = v?.volume != null ? v.volume.toLocaleString() : '<span class="text-gray-300">—</span>'
+        if (!row.querySelector('td.gsc-vol-cell')) row.appendChild(cell)
+      })
+    }
+    if (btn) { btn.disabled = false; btn.innerHTML = '📊 Search Volume ✓' }
+  } catch(e) {
+    toast('Volume fetch failed: ' + e.message, 'error')
+    if (btn) { btn.disabled = false; btn.innerHTML = '📊 Search Volume' }
   }
 }
 
@@ -2443,14 +2510,18 @@ function renderGscData(overview, pages, queries, opps) {
         </div>
 
         <div class="card">
-          <h3 class="font-semibold text-gray-700 mb-3">🔍 Top Queries</h3>
-          <table class="w-full text-sm">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold text-gray-700">🔍 Top Queries</h3>
+            <button class="btn btn-secondary btn-sm" id="gsc-vol-btn" onclick="fetchGscVolume()">📊 Search Volume</button>
+          </div>
+          <table class="w-full text-sm" id="gsc-queries-table">
             <thead><tr class="border-b border-gray-100 text-xs text-gray-400 uppercase">
               <th class="text-left py-1.5">Query</th>
               <th class="text-right py-1.5 px-2">Clicks</th>
               <th class="text-right py-1.5 px-2">Pos</th>
+              <th class="text-right py-1.5 px-2" id="gsc-vol-header" style="display:none">Vol/mo</th>
             </tr></thead>
-            <tbody>
+            <tbody id="gsc-queries-body">
               ${tableRows(queries, [
                 {fn: r => `<span class="text-gray-700 truncate block max-w-48">${esc(r.query)}</span>`},
                 {cls:'text-right text-gray-700 font-medium px-2', fn: r => r.clicks.toLocaleString()},
