@@ -85,7 +85,9 @@ def _migrate_columns():
     ])
 
     add_cols("products", [
-        ("notes", "TEXT"),
+        ("notes",      "TEXT"),
+        ("tracked_at", "TIMESTAMP"),
+        ("updated_at", "TIMESTAMP"),
     ])
 
     add_cols("topic_clusters", [
