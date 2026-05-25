@@ -131,22 +131,33 @@ class ContentWriter:
             for r in external_refs[:3]:
                 external_ctx += f'- <a href="{r["url"]}" target="_blank" rel="noopener">{r["title"]}</a>: {r.get("snippet", "")}\n'
 
-        brand_ctx = ""
         bp = brand_profile or {}
-        if bp.get("brand_name"):
-            brand_ctx += f"\nBrand: {bp['brand_name']}"
-        if bp.get("brand_description"):
-            brand_ctx += f"\nBrand description: {bp['brand_description']}"
-        if bp.get("brand_style"):
-            brand_ctx += f"\nBrand style: {bp['brand_style']}"
-        if bp.get("tone_of_voice"):
-            brand_ctx += f"\nTone of voice: {bp['tone_of_voice']}"
-        if bp.get("output_requirements"):
-            brand_ctx += f"\n\nOutput requirements:\n{bp['output_requirements']}"
+        tone_instruction = bp.get("tone_of_voice") or tone
+        type_ctx = f"\n- Article type: {article_type}" if article_type else ""
 
-        tone_instruction = tone
-        if bp.get("tone_of_voice"):
-            tone_instruction = bp["tone_of_voice"]
+        # ── Brand rules block — injected FIRST, enforced as highest priority ──
+        brand_block = ""
+        if any(bp.get(k) for k in ("brand_name", "brand_description", "brand_style",
+                                    "tone_of_voice", "output_requirements", "writing_notes")):
+            lines = ["━━━ BRAND RULES — MANDATORY — OVERRIDE EVERYTHING ELSE ━━━"]
+            if bp.get("brand_name"):
+                lines.append(f"Brand: {bp['brand_name']}")
+            if bp.get("brand_description"):
+                lines.append(f"Brand: {bp['brand_description']}")
+            if bp.get("brand_style"):
+                lines.append(f"Style: {bp['brand_style']}")
+            if bp.get("tone_of_voice"):
+                lines.append(f"Tone of voice: {bp['tone_of_voice']}")
+            if bp.get("output_requirements"):
+                lines.append(f"\nOutput requirements (follow exactly):\n{bp['output_requirements']}")
+            if bp.get("writing_notes"):
+                lines.append(
+                    f"\n⚠️ CRITICAL WRITING NOTES — These are NON-NEGOTIABLE constraints.\n"
+                    f"Violating any of these is NOT acceptable under any circumstance:\n"
+                    f"{bp['writing_notes']}"
+                )
+            lines.append("━━━ END BRAND RULES ━━━\n")
+            brand_block = "\n".join(lines) + "\n"
 
         lessons_ctx = ""
         if feedback_lessons:
@@ -159,8 +170,6 @@ class ContentWriter:
                 "\n\nUser notes for this specific article — follow these strictly:\n"
                 f"{notes.strip()}"
             )
-
-        type_ctx = f"\n- Article type: {article_type}" if article_type else ""
 
         product_ctx = ""
         if products:
@@ -184,7 +193,7 @@ class ContentWriter:
                 "- Use exact product URLs from the list above — do NOT invent URLs"
             )
 
-        system = f"""You are a professional SEO content writer.{brand_ctx}
+        system = f"""{brand_block}You are a professional SEO content writer.
 
 Writing rules:
 - Write in {language} for the {market.upper()} market, tone: {tone_instruction}{type_ctx}
@@ -396,20 +405,28 @@ Return ONLY a JSON array of {count} strings, no commentary. Example:
         """Rewrite an existing draft based on user instructions."""
         bp = brand_profile or {}
 
-        brand_ctx = ""
-        if bp.get("brand_name"):
-            brand_ctx += f"\nBrand: {bp['brand_name']}"
-        if bp.get("tone_of_voice"):
-            brand_ctx += f"\nTone of voice: {bp['tone_of_voice']}"
-        if bp.get("output_requirements"):
-            brand_ctx += f"\n\nOutput requirements:\n{bp['output_requirements']}"
+        rewrite_brand_block = ""
+        if any(bp.get(k) for k in ("brand_name", "tone_of_voice", "output_requirements", "writing_notes")):
+            lines = ["━━━ BRAND RULES — MANDATORY — OVERRIDE EVERYTHING ELSE ━━━"]
+            if bp.get("brand_name"):
+                lines.append(f"Brand: {bp['brand_name']}")
+            if bp.get("tone_of_voice"):
+                lines.append(f"Tone of voice: {bp['tone_of_voice']}")
+            if bp.get("output_requirements"):
+                lines.append(f"Output requirements:\n{bp['output_requirements']}")
+            if bp.get("writing_notes"):
+                lines.append(
+                    f"\n⚠️ CRITICAL WRITING NOTES — Non-negotiable:\n{bp['writing_notes']}"
+                )
+            lines.append("━━━ END BRAND RULES ━━━\n")
+            rewrite_brand_block = "\n".join(lines) + "\n"
 
         lessons_ctx = ""
         if feedback_lessons:
             lessons_ctx = "\n\nLessons from past feedback (keep these in mind):\n"
             lessons_ctx += "\n".join(f"- {l}" for l in feedback_lessons)
 
-        system = f"""You are an expert SEO content editor.{brand_ctx}{lessons_ctx}
+        system = f"""{rewrite_brand_block}You are an expert SEO content editor.{lessons_ctx}
 
 Your job is to rewrite the given article based on the user's instructions.
 Rules:

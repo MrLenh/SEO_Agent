@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, Integer, JSON, String, Text, UniqueConstraint
 
 from app.database import Base
 
@@ -16,9 +16,15 @@ class BrandProfile(Base):
     tone_of_voice   = Column(Text, nullable=True)
     output_requirements = Column(Text, nullable=True)
 
+    # Strict rules the AI must NEVER violate — highest enforcement priority
+    writing_notes   = Column(Text, nullable=True)
+
+    # User IDs explicitly granted access to this brand profile
+    shared_user_ids = Column(JSON, default=list)
+
     # Google Search Console — per-brand OAuth2
-    gsc_site_url      = Column(String(512), nullable=True)   # e.g. https://example.myshopify.com/
-    gsc_refresh_token = Column(Text, nullable=True)          # OAuth2 refresh token
+    gsc_site_url      = Column(String(512), nullable=True)
+    gsc_refresh_token = Column(Text, nullable=True)
 
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -43,6 +43,7 @@ class BrandProfileBody(BaseModel):
     brand_description: Optional[str] = None
     tone_of_voice: Optional[str] = None
     output_requirements: Optional[str] = None
+    writing_notes: Optional[str] = None
     gsc_site_url: Optional[str] = None
 
 
@@ -54,8 +55,10 @@ def _profile_out(p: BrandProfile) -> dict:
         "brand_description": p.brand_description or "",
         "tone_of_voice": p.tone_of_voice or "",
         "output_requirements": p.output_requirements or "",
+        "writing_notes": p.writing_notes or "",
         "gsc_site_url": p.gsc_site_url or "",
         "gsc_connected": bool(p.gsc_refresh_token),
+        "shared_user_ids": p.shared_user_ids or [],
         "updated_at": p.updated_at,
     }
 
@@ -65,7 +68,20 @@ def list_brand_profiles(
     user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    profiles = db.query(BrandProfile).order_by(BrandProfile.brand_name).all()
+    """Admins see all brands. Non-admins see brands shared with them or matching their stores."""
+    if user.role == "admin":
+        profiles = db.query(BrandProfile).order_by(BrandProfile.brand_name).all()
+    else:
+        from app.services.auth_service import get_user_shops
+        user_shops = set(get_user_shops(user, db))
+        all_profiles = db.query(BrandProfile).all()
+        profiles = [
+            p for p in all_profiles
+            if p.shop_domain is None                           # global
+            or (p.shop_domain and p.shop_domain in user_shops) # user's store
+            or (user.id in (p.shared_user_ids or []))          # explicitly shared
+        ]
+        profiles.sort(key=lambda p: p.brand_name or "")
     return [_profile_out(p) for p in profiles]
 
 
@@ -110,12 +126,78 @@ def save_brand_profile(
         profile.tone_of_voice = body.tone_of_voice
     if body.output_requirements is not None:
         profile.output_requirements = body.output_requirements
+    if body.writing_notes is not None:
+        profile.writing_notes = body.writing_notes
     if body.gsc_site_url is not None:
         profile.gsc_site_url = body.gsc_site_url or None
 
     db.commit()
     db.refresh(profile)
     return _profile_out(profile)
+
+
+# ── Brand profile user sharing ────────────────────────────────────────────────
+
+@settings_router.get("/brand/users")
+def list_brand_shared_users(
+    shop_domain: Optional[str] = Query(None),
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return users who have this brand profile explicitly shared with them."""
+    if user.role != "admin":
+        raise HTTPException(403, "Admin only")
+    profile = db.query(BrandProfile).filter_by(shop_domain=shop_domain).first()
+    if not profile:
+        return []
+    from app.models.user import User
+    shared_ids = profile.shared_user_ids or []
+    users = db.query(User).filter(User.id.in_(shared_ids)).all() if shared_ids else []
+    return [{"id": u.id, "name": u.name or u.email, "email": u.email, "role": u.role} for u in users]
+
+
+@settings_router.post("/brand/users/{user_id}")
+def share_brand_with_user(
+    user_id: int,
+    shop_domain: Optional[str] = Query(None),
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Grant a user access to this brand profile."""
+    if user.role != "admin":
+        raise HTTPException(403, "Admin only")
+    profile = db.query(BrandProfile).filter_by(shop_domain=shop_domain).first()
+    if not profile:
+        raise HTTPException(404, "Brand profile not found")
+    from app.models.user import User
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(404, "User not found")
+    ids = list(profile.shared_user_ids or [])
+    if user_id not in ids:
+        ids.append(user_id)
+        profile.shared_user_ids = ids
+        db.commit()
+    return {"shared": True, "user_id": user_id}
+
+
+@settings_router.delete("/brand/users/{user_id}")
+def unshare_brand_from_user(
+    user_id: int,
+    shop_domain: Optional[str] = Query(None),
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Revoke a user's access to this brand profile."""
+    if user.role != "admin":
+        raise HTTPException(403, "Admin only")
+    profile = db.query(BrandProfile).filter_by(shop_domain=shop_domain).first()
+    if not profile:
+        raise HTTPException(404, "Brand profile not found")
+    ids = [i for i in (profile.shared_user_ids or []) if i != user_id]
+    profile.shared_user_ids = ids
+    db.commit()
+    return {"unshared": True, "user_id": user_id}
 
 
 # ── Shopify OAuth credentials ─────────────────────────────────────────────────

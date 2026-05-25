@@ -55,6 +55,8 @@ def _migrate_columns():
         add_cols("brand_profiles", [
             ("gsc_site_url",      "VARCHAR(512)"),
             ("gsc_refresh_token", "TEXT"),
+            ("writing_notes",     "TEXT"),
+            ("shared_user_ids",   "TEXT"),
         ])
 
         add_cols("article_feedback", [

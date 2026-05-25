@@ -3288,14 +3288,37 @@ async function renderBrand() {
             <textarea id="bp-tone" rows="3" placeholder="e.g. Write like a knowledgeable friend who genuinely cares about skincare. Be warm and reassuring, avoid jargon. Use 'you' to address the reader directly...">${esc(bp.tone_of_voice||'')}</textarea>
           </div>
           <div>
-            <label>Output Requirements <span class="text-gray-400 font-normal text-xs">— markdown, formatting, structure rules</span></label>
-            <textarea id="bp-output" rows="6" placeholder="e.g.
+            <label>Output Requirements <span class="text-gray-400 font-normal text-xs">— formatting, structure, HTML rules</span></label>
+            <textarea id="bp-output" rows="5" placeholder="e.g.
 - Always open with a relatable problem/pain point in the first paragraph
 - Use bullet points for product comparisons
-- Include a 'Pro tip' callout box in every article using &lt;div class=&quot;pro-tip&quot;&gt;
-- End every article with a CTA to shop the collection
-- Avoid making medical claims; use 'may help' instead of 'cures'">${esc(bp.output_requirements||'')}</textarea>
+- Include a 'Pro tip' callout box using &lt;div class=&quot;pro-tip&quot;&gt;
+- End every article with a CTA to shop the collection">${esc(bp.output_requirements||'')}</textarea>
           </div>
+          <div class="border border-red-200 rounded-xl p-4 bg-red-50">
+            <label class="text-red-700">⚠️ Critical Writing Notes <span class="text-red-400 font-normal text-xs">— enforced above ALL other instructions, non-negotiable</span></label>
+            <textarea id="bp-notes" rows="5" placeholder="Rules the AI must NEVER violate, e.g.:
+- NEVER mention competitor brands by name
+- Do NOT make medical or health claims — use 'may help' or 'some users report'
+- Always cite sources when quoting statistics
+- Every article MUST include a paragraph about our return policy
+- Avoid phrases like 'the best' or '#1' without evidence"
+              class="border-red-300 focus:ring-red-400">${esc(bp.writing_notes||'')}</textarea>
+            <div class="text-xs text-red-600 mt-1">These rules are placed at the top of the AI system prompt and override everything else.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shared users -->
+      <div class="card" id="brand-users-panel">
+        <div class="font-semibold text-gray-800 mb-1">👥 Shared With Users</div>
+        <p class="text-sm text-gray-500 mb-3">Grant team members access to this brand profile. They will see it listed and the AI will apply it when they generate articles.</p>
+        <div id="brand-shared-list">${skeletons(2)}</div>
+        <div class="flex gap-2 mt-3" id="brand-add-user-row">
+          <select id="brand-user-select" style="flex:1">
+            <option value="">— Add a user —</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" onclick="addBrandUser()">+ Share</button>
         </div>
       </div>
 
@@ -3337,14 +3360,23 @@ async function renderBrand() {
       <div class="card bg-blue-50 border border-blue-100">
         <div class="text-sm font-medium text-blue-800 mb-1">How it works</div>
         <ul class="text-xs text-blue-700 space-y-1 list-disc list-inside">
-          <li>Profile is injected into the GPT-4o system prompt for every generated article</li>
-          <li>Store-specific profile takes priority over global profile</li>
+          <li><strong>Critical Writing Notes</strong> sit at the very top of the AI system prompt — they override all other instructions</li>
+          <li>Brand Profile is <strong>global</strong>: every generated article for this store must comply</li>
+          <li>Store-specific profile takes priority over the global default profile</li>
           <li>Tone of Voice overrides the per-article tone selector</li>
-          <li>Output Requirements give GPT-4o structural and formatting rules</li>
+          <li>Output Requirements set formatting/structure rules</li>
           <li>GSC connection scopes Search Console data to this brand's site</li>
         </ul>
       </div>
     </div>`
+
+  if (S.user?.role === 'admin') {
+    loadBrandSharedUsers()
+    loadUsersForBrandShare()
+  } else {
+    const panel = document.getElementById('brand-users-panel')
+    if (panel) panel.style.display = 'none'
+  }
 }
 
 async function saveBrand() {
@@ -3356,12 +3388,65 @@ async function saveBrand() {
     brand_style: document.getElementById('bp-style').value.trim(),
     tone_of_voice: document.getElementById('bp-tone').value.trim(),
     output_requirements: document.getElementById('bp-output').value.trim(),
+    writing_notes: document.getElementById('bp-notes')?.value.trim() || '',
     gsc_site_url: document.getElementById('bp-gsc-url')?.value.trim() || null,
   }
   try {
     S.brandProfile = await PUT('/api/v1/settings/brand', body)
     toast('Brand profile saved!', 'success')
   } catch(e) { toast('Save failed: ' + e.message, 'error') }
+}
+
+async function loadBrandSharedUsers() {
+  const shop = S.currentShop
+  const el = document.getElementById('brand-shared-list')
+  if (!el) return
+  try {
+    const users = await GET(`/api/v1/settings/brand/users${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
+    el.innerHTML = users.length === 0
+      ? '<div class="text-xs text-gray-400">No users shared yet.</div>'
+      : users.map(u => `
+          <div class="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+            <div>
+              <div class="text-sm font-medium text-gray-800">${esc(u.name||u.email)}</div>
+              <div class="text-xs text-gray-400">${esc(u.email)} · ${esc(u.role)}</div>
+            </div>
+            <button class="text-red-400 hover:text-red-600 text-xs" onclick="removeBrandUser(${u.id})">Revoke</button>
+          </div>`).join('')
+  } catch(e) {
+    if (el) el.innerHTML = `<div class="text-xs text-red-400">${esc(e.message)}</div>`
+  }
+}
+
+async function loadUsersForBrandShare() {
+  try {
+    const users = await GET('/api/v1/users/')
+    const sel = document.getElementById('brand-user-select')
+    if (!sel) return
+    sel.innerHTML = `<option value="">— Add a user —</option>` +
+      users.map(u => `<option value="${u.id}">${esc(u.name||u.email)} (${esc(u.email)})</option>`).join('')
+  } catch {}
+}
+
+async function addBrandUser() {
+  const shop = S.currentShop
+  const sel = document.getElementById('brand-user-select')
+  const userId = parseInt(sel?.value)
+  if (!userId) { toast('Select a user first', 'error'); return }
+  try {
+    await POST(`/api/v1/settings/brand/users/${userId}${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
+    toast('User added!', 'success')
+    loadBrandSharedUsers()
+    if (sel) sel.value = ''
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function removeBrandUser(userId) {
+  const shop = S.currentShop
+  try {
+    await DEL(`/api/v1/settings/brand/users/${userId}${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
+    loadBrandSharedUsers()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
 }
 
 async function gscConnect() {
