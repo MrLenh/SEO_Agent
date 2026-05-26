@@ -93,6 +93,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: rgb(55 65 81);
     <a class="nav-link" data-page="generate"  onclick="nav('generate')">✍️ Generate Article</a>
     <a class="nav-link" data-page="audit"     onclick="nav('audit')">📈 SEO Audit</a>
     <a class="nav-link" data-page="trends"    onclick="nav('trends')">📊 Market Trends</a>
+    <a class="nav-link" data-page="pipeline"  onclick="nav('pipeline')">🤖 AI Pipeline</a>
     <a class="nav-link hidden" id="kb-nav-link" data-page="knowledge" onclick="nav('knowledge')">🧠 Knowledge Base</a>
     <a class="nav-link" data-page="products"  onclick="nav('products')">🛍 Products KB</a>
     <a class="nav-link" data-page="brand"     onclick="nav('brand')">🎨 Brand Profile</a>
@@ -238,9 +239,9 @@ function nav(page) {
   S.page = page
   document.querySelectorAll('.nav-link').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page))
-  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', trends: 'Market Trends', knowledge: 'Knowledge Base', users: 'User Management', brand: 'Brand Profile', products: 'Products KB' }
+  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', trends: 'Market Trends', pipeline: '🤖 AI Pipeline', knowledge: 'Knowledge Base', users: 'User Management', brand: 'Brand Profile', products: 'Products KB' }
   document.getElementById('page-title').textContent = titles[page] || page
-  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, trends: renderTrends, knowledge: renderKnowledge, users: renderUsers, brand: renderBrand, products: renderProducts }
+  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, trends: renderTrends, pipeline: renderPipeline, knowledge: renderKnowledge, users: renderUsers, brand: renderBrand, products: renderProducts }
   pages[page]?.()
 }
 
@@ -1723,8 +1724,15 @@ async function renderGenerate() {
                  : ''}`}
         </div>
 
+        <div class="flex items-center gap-3 py-1 mb-2">
+          <input type="checkbox" id="gen-use-pipeline" class="w-4 h-4 rounded accent-indigo-600">
+          <label for="gen-use-pipeline" class="!mb-0 cursor-pointer text-sm">
+            <span class="font-medium">🤖 Use Full AI Pipeline</span>
+            <span class="text-xs text-gray-400 ml-1">(Research → Copywrite → Audit → Learning)</span>
+          </label>
+        </div>
         <button id="gen-btn" class="btn btn-primary w-full" style="width:100%;justify-content:center" onclick="doGenerate()">
-          ✍️ Generate Article with GPT-4o
+          ✍️ Generate Article
         </button>
       </div>
 
@@ -1842,6 +1850,7 @@ async function doGenerate() {
   const title   = document.getElementById('gen-title').value.trim()
   const keyword = document.getElementById('gen-kw').value.trim()
   const outline = outlineItems.filter(s => s.trim())
+  const usePipeline = document.getElementById('gen-use-pipeline')?.checked
 
   if (!title)          { toast('Enter article title', 'error'); return }
   if (!keyword)        { toast('Enter focus keyword', 'error'); return }
@@ -1849,13 +1858,68 @@ async function doGenerate() {
 
   const btn = document.getElementById('gen-btn')
   btn.disabled = true
-  btn.innerHTML = `<span class="spinner"></span> Generating article + image…`
 
+  // ── Full Pipeline mode ──
+  if (usePipeline) {
+    btn.innerHTML = `<span class="spinner"></span> Running AI Pipeline (Research → Copywrite → Audit)…`
+    document.getElementById('gen-result').innerHTML = `
+      <div class="card flex items-center justify-center text-center" style="min-height:300px">
+        <div>
+          <div class="spinner-dark mx-auto mb-4"></div>
+          <div class="text-sm text-gray-600 font-medium">🤖 AI Pipeline running…</div>
+          <div class="text-xs text-gray-400 mt-1">Research → Learning → Copywrite → Audit · Takes 60–120 seconds</div>
+        </div>
+      </div>`
+    try {
+      const brandDomain = document.getElementById('gen-brand')?.value || S.selectedBrandDomain
+      const r = await POST('/api/v1/pipeline/run', {
+        title, keyword,
+        shop_domain:     brandDomain || S.currentShop || null,
+        language:        document.getElementById('gen-lang').value,
+        country:         document.getElementById('gen-market')?.value || 'us',
+        market:          document.getElementById('gen-market')?.value || 'us',
+        word_count:      parseInt(document.getElementById('gen-words').value),
+        tone:            document.getElementById('gen-tone').value,
+        target_platform: document.getElementById('gen-platform')?.value || 'google',
+        article_type:    document.getElementById('gen-type')?.value || null,
+        notes:           document.getElementById('gen-notes')?.value?.trim() || null,
+        outline,
+        max_audit_iterations: 2,
+      })
+      // Show pipeline result in gen-result panel
+      document.getElementById('gen-result').innerHTML = `
+        <div class="card space-y-3">
+          <div class="flex items-center gap-2">
+            <span class="text-green-600 font-semibold text-sm">✅ Pipeline complete</span>
+            <span class="text-xs text-gray-400">Run #${r.run_id} · ${r.lessons_applied||0} lessons applied</span>
+          </div>
+          ${r.audit ? `<div class="flex gap-3">
+            <span class="text-xs font-bold border rounded-lg px-2 py-0.5 ${r.audit.grade==='A'?'text-green-600 bg-green-50 border-green-200':r.audit.grade==='B'?'text-blue-600 bg-blue-50 border-blue-200':'text-amber-600 bg-amber-50 border-amber-200'}">${r.audit.grade} · ${r.audit.score}/100</span>
+            <span class="text-xs text-gray-500">${r.audit.ready ? '✅ Ready to publish' : '⚠️ Review recommended'}</span>
+          </div>` : ''}
+          ${r.article?.id ? `<div class="flex gap-2 pt-2">
+            <button class="btn btn-primary btn-sm" onclick="openPublishModal(${r.article.id},'${esc(r.article.title||'')}')">🚀 Publish</button>
+            <button class="btn btn-secondary btn-sm" onclick="nav('pipeline')">📊 Full Details</button>
+          </div>` : ''}
+        </div>`
+      toast('✅ Pipeline complete!', 'success')
+    } catch(e) {
+      document.getElementById('gen-result').innerHTML =
+        `<div class="card"><div class="text-red-500 text-sm">Pipeline error: ${esc(e.message)}</div></div>`
+      toast('Pipeline failed: ' + e.message, 'error')
+    } finally {
+      btn.disabled = false; btn.innerHTML = '✍️ Generate Article'
+    }
+    return
+  }
+
+  // ── Quick Generate mode (existing logic) ──
+  btn.innerHTML = `<span class="spinner"></span> Generating article + image…`
   document.getElementById('gen-result').innerHTML = `
     <div class="card flex items-center justify-center text-center" style="min-height:300px">
       <div>
         <div class="spinner-dark mx-auto mb-4"></div>
-        <div class="text-sm text-gray-600 font-medium">GPT-4o is writing your article + generating image…</div>
+        <div class="text-sm text-gray-600 font-medium">Writing your article + generating image…</div>
         <div class="text-xs text-gray-400 mt-1">Typically 40–60 seconds</div>
       </div>
     </div>`
@@ -1863,7 +1927,6 @@ async function doGenerate() {
   try {
     const channelId = document.getElementById('gen-channel').value
     const brandDomain = document.getElementById('gen-brand')?.value || S.selectedBrandDomain
-    // Remember channel selection per shop
     if (channelId && S.currentShop) localStorage.setItem(`seo_pref_channel_${S.currentShop}`, channelId)
     const r = await POST('/api/v1/generate/article', {
       title, focus_keyword: keyword, outline,
@@ -1886,7 +1949,7 @@ async function doGenerate() {
     toast('Generation failed: ' + e.message, 'error')
   } finally {
     btn.disabled = false
-    btn.innerHTML = '✍️ Generate Article with GPT-4o'
+    btn.innerHTML = '✍️ Generate Article'
   }
 }
 
@@ -3454,6 +3517,420 @@ async function selectShop(shop) {
   await loadChannelsForShop()
   // Refresh whatever page the user is on so data reflects the new store
   if (typeof nav === 'function' && S.page) nav(S.page)
+}
+
+// ══════════════════════ AI PIPELINE ═══════════════════════
+
+const AGENT_META = {
+  research:           { icon: '🔍', label: 'Research',         desc: 'Keyword analysis, search volume, anchor text' },
+  learning_pre:       { icon: '🧠', label: 'Learning (pre)',    desc: 'Synthesize lessons from past data' },
+  copywrite:          { icon: '✍️', label: 'Copywrite',         desc: 'Write SEO article with brand + lessons' },
+  audit:              { icon: '📈', label: 'Audit',             desc: 'Check SEO quality, score & feedback' },
+  copywrite_revision: { icon: '🔄', label: 'Revision',          desc: 'Rewrite based on audit feedback' },
+  learning_post:      { icon: '📚', label: 'Learning (post)',   desc: 'Simulate review, record lessons' },
+}
+
+let _pipelineRunId = null
+let _pipelinePoller = null
+
+async function renderPipeline() {
+  document.getElementById('header-actions').innerHTML =
+    `<button class="btn btn-secondary btn-sm" onclick="loadPipelineLessons()">🧠 View Lessons</button>
+     <button class="btn btn-secondary btn-sm" onclick="loadPipelinePlan()">📊 Planning</button>`
+
+  document.getElementById('content').innerHTML = `
+    <div class="space-y-6">
+
+      <!-- Run Form -->
+      <div class="card">
+        <h2 class="font-semibold text-gray-800 mb-4">🤖 Run AI Pipeline</h2>
+        <p class="text-xs text-gray-500 mb-4">5 agents work in sequence: Research → Learning → Copywrite → Audit (→ re-write if needed) → Learning post-analysis.</p>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label>Article Title <span class="text-red-500">*</span></label>
+            <input id="pipe-title" type="text" placeholder="e.g. How to Choose the Best Running Shoes">
+          </div>
+          <div>
+            <label>Focus Keyword <span class="text-red-500">*</span></label>
+            <input id="pipe-kw" type="text" placeholder="e.g. best running shoes">
+          </div>
+          <div>
+            <label>Language</label>
+            <select id="pipe-lang">
+              <option value="en">English</option><option value="vi">Vietnamese</option>
+              <option value="de">German</option><option value="fr">French</option>
+              <option value="ja">Japanese</option><option value="ko">Korean</option>
+            </select>
+          </div>
+          <div>
+            <label>Country</label>
+            <select id="pipe-country">
+              <option value="us">🇺🇸 US</option><option value="gb">🇬🇧 UK</option>
+              <option value="au">🇦🇺 AU</option><option value="ca">🇨🇦 CA</option>
+              <option value="vn">🇻🇳 VN</option><option value="sg">🇸🇬 SG</option>
+              <option value="de">🇩🇪 DE</option><option value="fr">🇫🇷 FR</option>
+            </select>
+          </div>
+          <div>
+            <label>Target words</label>
+            <select id="pipe-words">
+              <option value="1200">1,200</option><option value="1500" selected>1,500</option>
+              <option value="2000">2,000</option><option value="2500">2,500</option>
+            </select>
+          </div>
+          <div>
+            <label>Platform</label>
+            <select id="pipe-platform">
+              <option value="google">Google SEO</option>
+              <option value="shopify">Shopify</option>
+              <option value="wordpress">WordPress</option>
+              <option value="youtube">YouTube</option>
+            </select>
+          </div>
+          <div>
+            <label>Audit iterations</label>
+            <select id="pipe-iters">
+              <option value="1">1 (faster)</option>
+              <option value="2" selected>2 (recommended)</option>
+              <option value="3">3 (thorough)</option>
+            </select>
+          </div>
+          <div>
+            <label>Notes (optional)</label>
+            <input id="pipe-notes" type="text" placeholder="Any special requirements...">
+          </div>
+        </div>
+        <button id="pipe-btn" class="btn btn-primary" onclick="startPipeline()">🚀 Run Full Pipeline</button>
+      </div>
+
+      <!-- Agent Flow Visualization -->
+      <div id="pipe-flow" class="hidden card">
+        <h3 class="font-semibold text-gray-700 mb-4">Pipeline Progress</h3>
+        <div id="pipe-agents" class="flex flex-col gap-2"></div>
+      </div>
+
+      <!-- Pipeline Result -->
+      <div id="pipe-result"></div>
+
+      <!-- Recent Runs -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-gray-700">Recent Runs</h3>
+          <button class="btn btn-secondary btn-sm" onclick="loadPipelineRuns()">↻ Refresh</button>
+        </div>
+        <div id="pipe-runs"><div class="text-xs text-gray-400">Loading…</div></div>
+      </div>
+
+    </div>`
+
+  loadPipelineRuns()
+}
+
+async function startPipeline() {
+  const title = document.getElementById('pipe-title')?.value?.trim()
+  const kw    = document.getElementById('pipe-kw')?.value?.trim()
+  if (!title || !kw) { toast('Enter title and keyword', 'error'); return }
+
+  const btn = document.getElementById('pipe-btn')
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Starting pipeline…'
+
+  document.getElementById('pipe-flow').classList.remove('hidden')
+  document.getElementById('pipe-result').innerHTML = ''
+  renderAgentFlow([])
+
+  try {
+    const r = await POST('/api/v1/pipeline/run', {
+      title,
+      keyword: kw,
+      shop_domain: S.currentShop || null,
+      language:    document.getElementById('pipe-lang')?.value || 'en',
+      country:     document.getElementById('pipe-country')?.value || 'us',
+      word_count:  parseInt(document.getElementById('pipe-words')?.value || '1500'),
+      target_platform: document.getElementById('pipe-platform')?.value || 'google',
+      max_audit_iterations: parseInt(document.getElementById('pipe-iters')?.value || '2'),
+      notes: document.getElementById('pipe-notes')?.value?.trim() || null,
+    })
+    renderAgentFlow(r.steps || [])
+    renderPipelineResult(r)
+    loadPipelineRuns()
+    toast('✅ Pipeline complete!', 'success')
+  } catch(e) {
+    document.getElementById('pipe-result').innerHTML =
+      `<div class="card text-red-500 text-sm p-4">Pipeline failed: ${esc(e.message)}</div>`
+    toast('Pipeline failed: ' + e.message, 'error')
+  } finally {
+    btn.disabled = false; btn.innerHTML = '🚀 Run Full Pipeline'
+  }
+}
+
+function renderAgentFlow(steps) {
+  const el = document.getElementById('pipe-agents')
+  if (!el) return
+
+  const AGENTS = ['research','learning_pre','copywrite','audit','copywrite_revision','learning_post']
+  const stepMap = {}
+  for (const s of steps) {
+    stepMap[s.agent] = s
+  }
+
+  const statusIcon = s => !s ? '⏳' : s.status === 'running' ? '<span class="spinner inline-block w-3 h-3"></span>' : s.status === 'done' ? '✅' : '❌'
+  const statusColor = s => !s ? 'border-gray-200 bg-gray-50' : s.status === 'running' ? 'border-indigo-300 bg-indigo-50' : s.status === 'done' ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'
+
+  el.innerHTML = AGENTS.map(key => {
+    const meta = AGENT_META[key] || { icon: '🤖', label: key, desc: '' }
+    const step = stepMap[key]
+    const dataLines = step?.data ? Object.entries(step.data)
+      .filter(([k, v]) => v !== null && v !== undefined && !Array.isArray(v))
+      .slice(0, 3)
+      .map(([k, v]) => `<span class="text-xs text-gray-500">${k}: <strong>${typeof v === 'object' ? JSON.stringify(v) : esc(String(v))}</strong></span>`)
+      .join('  ') : ''
+    return `
+      <div class="flex items-start gap-3 p-3 border rounded-lg ${statusColor(step)}">
+        <div class="text-xl shrink-0 mt-0.5">${meta.icon}</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="font-medium text-sm text-gray-800">${meta.label}</span>
+            <span class="text-xs text-gray-400">${meta.desc}</span>
+            <span class="ml-auto">${statusIcon(step)}</span>
+          </div>
+          ${dataLines ? `<div class="mt-1 flex flex-wrap gap-3">${dataLines}</div>` : ''}
+        </div>
+      </div>`
+  }).join('')
+}
+
+function renderPipelineResult(r) {
+  const el = document.getElementById('pipe-result')
+  if (!el) return
+
+  const audit = r.audit || {}
+  const sim = r.simulated_feedback || {}
+  const article = r.article || {}
+
+  const gradeColor = g => ({A:'text-green-600 bg-green-50 border-green-200', B:'text-blue-600 bg-blue-50 border-blue-200', C:'text-yellow-600 bg-yellow-50 border-yellow-200', D:'text-orange-600 bg-orange-50 border-orange-200', F:'text-red-600 bg-red-50 border-red-200'})[g] || 'text-gray-600 bg-gray-50 border-gray-200'
+
+  el.innerHTML = `
+    <div class="card space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="font-semibold text-gray-800">Pipeline Result</h3>
+        <div class="flex gap-2">
+          ${article.id ? `<button class="btn btn-primary btn-sm" onclick="openPublishModal(${article.id},'${esc(article.title || '')}')">🚀 Publish</button>` : ''}
+          ${article.id ? `<button class="btn btn-secondary btn-sm" onclick="nav('posts')">📝 View Post</button>` : ''}
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-3">
+        <!-- Audit Score -->
+        <div class="border rounded-xl p-3 text-center ${audit.ready ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}">
+          <div class="text-2xl font-bold ${gradeColor(audit.grade)} border rounded-lg inline-block px-2 py-0.5 mb-1">${audit.grade || '—'}</div>
+          <div class="text-sm font-medium text-gray-700">Audit Score: ${audit.score || 0}/100</div>
+          <div class="text-xs text-gray-500 mt-0.5">${audit.ready ? '✅ Ready to publish' : '⚠️ Needs review'}</div>
+        </div>
+
+        <!-- Simulated User Review -->
+        <div class="border rounded-xl p-3 text-center border-purple-200 bg-purple-50">
+          <div class="text-2xl font-bold text-purple-700 mb-1">${'★'.repeat(sim.simulated_rating || 0)}${'☆'.repeat(5-(sim.simulated_rating||0))}</div>
+          <div class="text-sm font-medium text-gray-700">AI Review: ${sim.simulated_rating || '—'}/5</div>
+          <div class="text-xs text-gray-500 mt-0.5">${sim.would_publish ? '✅ Would publish' : '⚠️ Needs work'}</div>
+        </div>
+
+        <!-- Lessons Applied -->
+        <div class="border rounded-xl p-3 text-center border-blue-200 bg-blue-50">
+          <div class="text-2xl font-bold text-blue-700 mb-1">${r.lessons_applied || 0}</div>
+          <div class="text-sm font-medium text-gray-700">Lessons Applied</div>
+          <div class="text-xs text-gray-500 mt-0.5">from Learning Agent</div>
+        </div>
+      </div>
+
+      <!-- Article preview -->
+      ${article.title ? `
+        <div class="p-3 bg-gray-50 rounded-lg">
+          <div class="font-medium text-gray-800 text-sm">${esc(article.title)}</div>
+          ${article.seo_title ? `<div class="text-xs text-gray-500 mt-1">SEO: ${esc(article.seo_title)}</div>` : ''}
+          ${article.content_preview ? `<div class="text-xs text-gray-400 mt-2 line-clamp-3">${esc(article.content_preview)}</div>` : ''}
+        </div>` : ''}
+
+      <!-- AI Review feedback -->
+      ${sim.simulated_feedback ? `
+        <div class="p-3 bg-purple-50 rounded-lg border border-purple-100">
+          <div class="text-xs font-semibold text-purple-700 mb-1">🤖 Simulated Expert Review</div>
+          <div class="text-sm text-gray-700">${esc(sim.simulated_feedback)}</div>
+          ${sim.strengths?.length ? `<div class="mt-2 flex flex-wrap gap-1">${sim.strengths.slice(0,3).map(s => `<span class="text-xs bg-green-100 text-green-700 rounded px-2 py-0.5">✓ ${esc(s)}</span>`).join('')}</div>` : ''}
+        </div>` : ''}
+
+      <!-- Audit issues -->
+      ${(audit.issues?.length || audit.warnings?.length) ? `
+        <div class="space-y-1">
+          ${(audit.issues||[]).map(i => `<div class="text-xs text-red-700 flex gap-1.5"><span>✗</span><span>${esc(i)}</span></div>`).join('')}
+          ${(audit.warnings||[]).map(w => `<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(w)}</span></div>`).join('')}
+        </div>` : ''}
+    </div>`
+}
+
+async function loadPipelineRuns() {
+  const el = document.getElementById('pipe-runs')
+  if (!el) return
+  try {
+    const runs = await GET(`/api/v1/pipeline/runs?${S.currentShop ? 'shop_domain='+encodeURIComponent(S.currentShop)+'&' : ''}limit=10`)
+    if (!runs.length) { el.innerHTML = '<div class="text-xs text-gray-400 py-2">No pipeline runs yet.</div>'; return }
+
+    const statusBadge2 = s => ({
+      running: '<span class="badge badge-blue">⏳ Running</span>',
+      done:    '<span class="badge badge-green">✅ Done</span>',
+      failed:  '<span class="badge" style="background:#fee2e2;color:#dc2626">❌ Failed</span>',
+    })[s] || `<span class="badge">${s}</span>`
+
+    el.innerHTML = `<div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="border-b border-gray-100 text-xs text-gray-400 uppercase">
+        <th class="text-left py-2">Keyword</th>
+        <th class="text-left py-2">Status</th>
+        <th class="text-left py-2">Steps</th>
+        <th class="text-left py-2">Created</th>
+        <th class="py-2"></th>
+      </tr></thead>
+      <tbody>
+        ${runs.map(r => `
+          <tr class="border-b border-gray-50 table-row">
+            <td class="py-2 font-medium text-gray-800">${esc(r.keyword)}</td>
+            <td class="py-2">${statusBadge2(r.status)}</td>
+            <td class="py-2 text-gray-500 text-xs">${r.step_count} steps</td>
+            <td class="py-2 text-gray-400 text-xs">${r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</td>
+            <td class="py-2">
+              <div class="flex gap-1 action-btns">
+                <button class="btn btn-secondary btn-sm" onclick="viewPipelineRun(${r.id})">Details</button>
+                ${r.post_id ? `<button class="btn btn-secondary btn-sm" onclick="openPublishModal(${r.post_id},'')">Publish</button>` : ''}
+              </div>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>`
+  } catch(e) {
+    el.innerHTML = `<div class="text-xs text-red-500">Failed to load runs: ${esc(e.message)}</div>`
+  }
+}
+
+async function viewPipelineRun(runId) {
+  try {
+    const run = await GET(`/api/v1/pipeline/runs/${runId}`)
+    openModal(`Pipeline Run #${runId} — ${esc(run.keyword)}`,
+      `<div class="space-y-3">
+        <div class="flex gap-3 text-xs text-gray-500">
+          <span>Status: <strong>${run.status}</strong></span>
+          <span>Post: <strong>${run.post_id || '—'}</strong></span>
+          <span>Created: <strong>${run.created_at ? new Date(run.created_at).toLocaleString() : '—'}</strong></span>
+        </div>
+        ${run.error ? `<div class="text-xs text-red-600 bg-red-50 p-2 rounded">${esc(run.error)}</div>` : ''}
+        <div class="space-y-2">
+          ${(run.steps || []).map(s => {
+            const meta = AGENT_META[s.agent] || { icon: '🤖', label: s.agent }
+            const dataStr = s.data ? JSON.stringify(s.data, null, 2) : ''
+            return `<div class="p-2 border rounded-lg ${s.status === 'done' ? 'border-green-200 bg-green-50' : 'border-gray-200'}">
+              <div class="text-xs font-semibold text-gray-700">${meta.icon} ${meta.label} — ${s.status}</div>
+              ${dataStr ? `<pre class="text-xs text-gray-500 mt-1 overflow-x-auto" style="max-height:80px">${esc(dataStr)}</pre>` : ''}
+            </div>`
+          }).join('')}
+        </div>
+      </div>`,
+      `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>
+       ${run.post_id ? `<button class="btn btn-primary btn-sm" onclick="closeModal();openPublishModal(${run.post_id},'')">🚀 Publish Article</button>` : ''}`
+    )
+  } catch(e) { toast('Failed to load run: ' + e.message, 'error') }
+}
+
+async function loadPipelineLessons() {
+  try {
+    const data = await GET(`/api/v1/pipeline/lessons?${S.currentShop ? 'shop_domain='+encodeURIComponent(S.currentShop) : ''}`)
+    const lessons = data.lessons || []
+
+    openModal('🧠 Learning Agent — Lessons',
+      `<div class="space-y-3">
+        <p class="text-xs text-gray-500">Synthesized from user feedback, keyword rankings, and audit scores. Used automatically in every pipeline run.</p>
+        ${lessons.length ? `
+          <div class="space-y-2">
+            ${lessons.map(l => `<div class="flex gap-2 p-2 bg-gray-50 rounded-lg text-sm">
+              <span class="shrink-0">${l.startsWith('✅') ? '✅' : l.startsWith('⚠️') ? '⚠️' : '💡'}</span>
+              <span class="text-gray-700">${esc(l.replace(/^[✅⚠️💡]\s*/,''))}</span>
+            </div>`).join('')}
+          </div>` : `<div class="text-gray-400 text-sm text-center py-6">No lessons yet. Run the pipeline a few times to accumulate learning data.</div>`}
+        <div class="pt-2 border-t">
+          <button class="btn btn-secondary btn-sm" onclick="triggerLearnNow(this)">🔄 Synthesize lessons now</button>
+          <span class="text-xs text-gray-400 ml-2">${data.source_count || 0} knowledge entries</span>
+        </div>
+      </div>`,
+      `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>`
+    )
+  } catch(e) { toast('Failed to load lessons: ' + e.message, 'error') }
+}
+
+async function triggerLearnNow(btn) {
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  btn.disabled = true; btn.textContent = 'Synthesizing…'
+  try {
+    const r = await POST('/api/v1/pipeline/learn', { shop_domain: S.currentShop })
+    toast(`🧠 ${r.count} lessons synthesized!`, 'success')
+    closeModal()
+    loadPipelineLessons()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+  finally { btn.disabled = false; btn.textContent = '🔄 Synthesize lessons now' }
+}
+
+async function loadPipelinePlan() {
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  const btn = document.querySelector('[onclick="loadPipelinePlan()"]')
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' }
+
+  try {
+    const data = await POST('/api/v1/pipeline/plan', { shop_domain: S.currentShop })
+    const strat = data.strategy || {}
+    const tracking = data.tracking_summary || {}
+    const gsc = data.gsc_summary || {}
+
+    openModal('📊 Planning Agent — Strategy',
+      `<div class="space-y-4">
+        <!-- Summary -->
+        ${strat.summary ? `<div class="p-3 bg-blue-50 border border-blue-100 rounded-lg text-sm text-gray-700">${esc(strat.summary)}</div>` : ''}
+
+        <!-- Stats row -->
+        <div class="grid grid-cols-4 gap-3">
+          ${[
+            {label:'Tracked KWs', val: tracking.total_tracked || 0},
+            {label:'Top 10', val: tracking.top_10 || 0},
+            {label:'Improving', val: tracking.improving || 0},
+            {label:'GSC Clicks (28d)', val: (gsc.total_clicks||0).toLocaleString()},
+          ].map(x => `<div class="text-center p-2 bg-gray-50 rounded-lg">
+            <div class="text-lg font-bold text-gray-800">${x.val}</div>
+            <div class="text-xs text-gray-500">${x.label}</div>
+          </div>`).join('')}
+        </div>
+
+        <!-- Priority keywords -->
+        ${strat.priority_keywords?.length ? `
+          <div>
+            <div class="text-xs font-semibold text-gray-500 uppercase mb-2">Priority Keywords to Target</div>
+            <div class="space-y-1.5">
+              ${strat.priority_keywords.slice(0,6).map(k => `
+                <div class="flex items-start gap-2 p-2 border rounded-lg bg-gray-50">
+                  <span class="text-xs font-bold ${k.opportunity === 'high' ? 'text-green-600' : k.opportunity === 'medium' ? 'text-yellow-600' : 'text-gray-500'} w-12 shrink-0">${(k.opportunity||'').toUpperCase()}</span>
+                  <div class="min-w-0">
+                    <div class="text-sm font-medium text-gray-800">${esc(k.keyword || '')}</div>
+                    <div class="text-xs text-gray-500">${esc(k.reason || '')} · ${esc(k.action || '')}</div>
+                  </div>
+                  <button class="btn btn-secondary btn-sm shrink-0" onclick="closeModal();document.getElementById('pipe-kw').value='${esc(k.keyword||'')}';nav('pipeline')">Use →</button>
+                </div>`).join('')}
+            </div>
+          </div>` : ''}
+
+        <!-- Recommendations -->
+        ${strat.recommendations?.length ? `
+          <div>
+            <div class="text-xs font-semibold text-gray-500 uppercase mb-2">Recommendations</div>
+            ${strat.recommendations.slice(0,5).map(r => `<div class="text-sm text-gray-700 flex gap-2 py-1"><span class="text-indigo-400">→</span>${esc(r)}</div>`).join('')}
+          </div>` : ''}
+      </div>`,
+      `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>`
+    )
+  } catch(e) { toast('Planning failed: ' + e.message, 'error') }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = '📊 Planning' } }
 }
 
 // ══════════════════════ KNOWLEDGE BASE ═══════════════════════

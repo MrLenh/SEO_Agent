@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     # AI
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o"
+    OPENAI_MODEL_FAST: str = ""   # e.g. gpt-4o-mini — for Research & Planning agents
+    OPENAI_MODEL_SMART: str = ""  # e.g. gpt-4o — for Copywrite & Learning agents
 
     # SEO
     SERPER_API_KEY: str = ""
