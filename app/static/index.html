@@ -643,6 +643,7 @@ async function loadPosts() {
           <th class="pb-3 font-medium w-36">Keyword</th>
           <th class="pb-3 font-medium w-24">Status</th>
           <th class="pb-3 font-medium w-24">Source</th>
+          <th class="pb-3 font-medium w-28">Updated</th>
           <th class="pb-3 font-medium w-32">Actions</th>
         </tr></thead>
         <tbody>${posts.map(p => `
@@ -658,6 +659,7 @@ async function loadPosts() {
             <td class="py-3 pr-3 text-gray-500 truncate max-w-[144px]">${esc(p.focus_keyword||'—')}</td>
             <td class="py-3 pr-3">${statusBadge(p.status)}</td>
             <td class="py-3 pr-3">${sourceBadge(p.source)}</td>
+            <td class="py-3 pr-3 text-xs text-gray-400 whitespace-nowrap">${p.updated_at ? fmtDate(p.updated_at) : '—'}</td>
             <td class="py-3">
               <div class="action-btns flex gap-1 flex-wrap">
                 <button class="btn btn-secondary btn-sm" onclick="viewPost(${p.id})">View</button>
