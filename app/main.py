@@ -13,6 +13,7 @@ from app.api.content_routes import generate_router, research_router, topics_rout
 from app.api.init_routes import blog_router, router as init_router
 from app.api.knowledge_routes import knowledge_router
 from app.api.tracking_routes import tracking_router
+from app.api.trends_routes import trends_router
 from app.api.product_routes import product_router
 from app.api.publish_routes import publish_router
 from app.api.settings_routes import settings_router
@@ -132,6 +133,7 @@ app.include_router(publish_router)
 app.include_router(settings_router)
 app.include_router(knowledge_router)
 app.include_router(tracking_router)
+app.include_router(trends_router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
