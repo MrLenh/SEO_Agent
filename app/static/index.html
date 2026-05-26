@@ -92,6 +92,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: rgb(55 65 81);
     <a class="nav-link" data-page="topics"    onclick="nav('topics')">🗂 Topic Clusters</a>
     <a class="nav-link" data-page="generate"  onclick="nav('generate')">✍️ Generate Article</a>
     <a class="nav-link" data-page="audit"     onclick="nav('audit')">📈 SEO Audit</a>
+    <a class="nav-link" data-page="trends"    onclick="nav('trends')">📊 Market Trends</a>
     <a class="nav-link hidden" id="kb-nav-link" data-page="knowledge" onclick="nav('knowledge')">🧠 Knowledge Base</a>
     <a class="nav-link" data-page="products"  onclick="nav('products')">🛍 Products KB</a>
     <a class="nav-link" data-page="brand"     onclick="nav('brand')">🎨 Brand Profile</a>
@@ -237,9 +238,9 @@ function nav(page) {
   S.page = page
   document.querySelectorAll('.nav-link').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page))
-  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', knowledge: 'Knowledge Base', users: 'User Management', brand: 'Brand Profile', products: 'Products KB' }
+  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', trends: 'Market Trends', knowledge: 'Knowledge Base', users: 'User Management', brand: 'Brand Profile', products: 'Products KB' }
   document.getElementById('page-title').textContent = titles[page] || page
-  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, knowledge: renderKnowledge, users: renderUsers, brand: renderBrand, products: renderProducts }
+  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, trends: renderTrends, knowledge: renderKnowledge, users: renderUsers, brand: renderBrand, products: renderProducts }
   pages[page]?.()
 }
 
@@ -2718,6 +2719,237 @@ function prefillRankingCheck(keyword) {
     const el = document.getElementById('ranking-keywords')
     if (el) el.value = keyword
   }, 100)
+}
+
+// ═══════════════════ MARKET TRENDS ═══════════════════════════
+
+const TREND_COUNTRIES = [
+  {v:'us',l:'🇺🇸 US'},{v:'gb',l:'🇬🇧 UK'},{v:'au',l:'🇦🇺 AU'},{v:'ca',l:'🇨🇦 CA'},
+  {v:'vn',l:'🇻🇳 VN'},{v:'sg',l:'🇸🇬 SG'},{v:'th',l:'🇹🇭 TH'},{v:'de',l:'🇩🇪 DE'},
+  {v:'fr',l:'🇫🇷 FR'},{v:'jp',l:'🇯🇵 JP'},{v:'kr',l:'🇰🇷 KR'},{v:'in',l:'🇮🇳 IN'},
+]
+const TREND_LANGS = [
+  {v:'en',l:'English'},{v:'vi',l:'Vietnamese'},{v:'de',l:'German'},
+  {v:'fr',l:'French'},{v:'ja',l:'Japanese'},{v:'ko',l:'Korean'},
+  {v:'th',l:'Thai'},{v:'id',l:'Indonesian'},
+]
+
+async function renderTrends() {
+  document.getElementById('header-actions').innerHTML = ''
+  const status = await GET('/api/v1/trends/status').catch(() => ({ configured: false }))
+
+  const countryOpts = TREND_COUNTRIES.map(c => `<option value="${c.v}">${c.l}</option>`).join('')
+  const langOpts    = TREND_LANGS.map(l => `<option value="${l.v}">${l.l}</option>`).join('')
+  const timeOpts = [
+    {v:'past_7_days',l:'Last 7 days'},{v:'past_30_days',l:'Last 30 days'},
+    {v:'past_12_months',l:'Last 12 months'},{v:'past_5_years',l:'Last 5 years'},
+  ].map(o => `<option value="${o.v}" ${o.v==='past_12_months'?'selected':''}>${o.l}</option>`).join('')
+
+  document.getElementById('content').innerHTML = `
+    <div class="space-y-4">
+      <div class="card">
+        <div class="flex items-end gap-3 flex-wrap">
+          <div style="flex:1;min-width:200px">
+            <label>Keyword</label>
+            <input type="text" id="trend-kw" placeholder="e.g. handmade jewelry, SEO tools"
+              onkeyup="if(event.key==='Enter')doTrendExplore()">
+          </div>
+          <div>
+            <label>Country</label>
+            <select id="trend-country" style="width:110px">${countryOpts}</select>
+          </div>
+          <div>
+            <label>Language</label>
+            <select id="trend-lang" style="width:120px">${langOpts}</select>
+          </div>
+          <div>
+            <label>Period</label>
+            <select id="trend-time" style="width:150px">${timeOpts}</select>
+          </div>
+          <button class="btn btn-primary" id="trend-btn" onclick="doTrendExplore()">📊 Explore Trends</button>
+        </div>
+        ${!status.configured ? `
+          <div class="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700">
+            ⚠️ DataForSEO not configured. Set <code>DATAFORSEO_LOGIN</code> and <code>DATAFORSEO_PASSWORD</code> in your environment variables.
+          </div>` : ''}
+      </div>
+      <div id="trend-out"></div>
+    </div>`
+}
+
+async function doTrendExplore() {
+  const kw = document.getElementById('trend-kw')?.value?.trim()
+  if (!kw) { toast('Enter a keyword', 'error'); return }
+  const btn = document.getElementById('trend-btn')
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Researching…'
+  document.getElementById('trend-out').innerHTML = `
+    <div class="card"><div class="flex justify-center py-10"><div class="spinner-dark"></div></div></div>`
+
+  const country  = document.getElementById('trend-country')?.value  || 'us'
+  const language = document.getElementById('trend-lang')?.value     || 'en'
+  const timeRange = document.getElementById('trend-time')?.value    || 'past_12_months'
+
+  try {
+    const [trendData, kwData] = await Promise.allSettled([
+      POST('/api/v1/trends/explore',   { keyword: kw, country, language, time_range: timeRange }),
+      POST('/api/v1/trends/keywords',  { keyword: kw, country, language, limit: 50 }),
+    ])
+    renderTrendResults(
+      trendData.status === 'fulfilled' ? trendData.value : null,
+      kwData.status   === 'fulfilled' ? kwData.value   : null,
+      kw
+    )
+    if (trendData.status === 'rejected') toast('Trends: ' + trendData.reason?.message, 'error')
+    if (kwData.status   === 'rejected') toast('Keywords: ' + kwData.reason?.message, 'error')
+  } catch(e) {
+    document.getElementById('trend-out').innerHTML = `<div class="card text-red-500 text-sm p-4">${esc(e.message)}</div>`
+  } finally {
+    btn.disabled = false; btn.innerHTML = '📊 Explore Trends'
+  }
+}
+
+function renderTrendResults(trend, kwRes, seedKw) {
+  const el = document.getElementById('trend-out')
+  if (!el) return
+
+  // ── Trend Chart ──
+  let chartSection = ''
+  if (trend?.timeline?.length >= 2) {
+    const vals = trend.timeline.map(t => t.value)
+    const maxV = Math.max(...vals, 1)
+    const W = 800, H = 80, PAD = 4
+    const pts = vals.map((v, i) => {
+      const x = PAD + (i / (vals.length - 1)) * (W - PAD*2)
+      const y = H - PAD - (v / maxV) * (H - PAD*2)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    }).join(' ')
+    const labels = trend.timeline.filter((_, i) => i % Math.ceil(vals.length/8) === 0)
+      .map(t => {
+        const x = PAD + (trend.timeline.indexOf(t) / (vals.length-1)) * (W - PAD*2)
+        return `<text x="${x.toFixed(1)}" y="${H+14}" text-anchor="middle" font-size="9" fill="#9ca3af">${esc(t.date.slice(0,7))}</text>`
+      }).join('')
+
+    chartSection = `
+      <div class="card">
+        <div class="flex items-center justify-between mb-2">
+          <div>
+            <h3 class="font-semibold text-gray-700">📈 Interest Over Time</h3>
+            <p class="text-xs text-gray-400 mt-0.5">Relative search interest (100 = peak) · ${esc(trend.time_range?.replace(/_/g,' ') || '')}</p>
+          </div>
+          <span class="badge badge-blue">${esc((trend.country||'').toUpperCase())}</span>
+        </div>
+        <svg viewBox="0 0 ${W} ${H+20}" class="w-full" style="height:100px">
+          <polyline points="${pts}" fill="none" stroke="rgb(79,70,229)" stroke-width="2.5" stroke-linejoin="round"/>
+          ${labels}
+        </svg>
+      </div>`
+  }
+
+  // ── Top & Rising Queries ──
+  let queriesSection = ''
+  if (trend && (trend.top_queries?.length || trend.rising_queries?.length)) {
+    const queryCard = (title, icon, items) => !items?.length ? '' : `
+      <div class="card">
+        <h3 class="font-semibold text-gray-700 mb-3">${icon} ${esc(title)}</h3>
+        <div class="space-y-1.5">
+          ${items.map((q, i) => `
+            <div class="flex items-center justify-between gap-3 py-1 border-b border-gray-50 last:border-0">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-xs font-bold text-gray-300 w-4 shrink-0">${i+1}</span>
+                <span class="text-sm text-gray-700 truncate">${esc(q.query)}</span>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <div class="w-16 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                  <div class="h-1.5 rounded-full bg-indigo-500" style="width:${Math.min(100,(q.value/Math.max(...items.map(x=>x.value),1)*100)).toFixed(0)}%"></div>
+                </div>
+                <button class="btn btn-secondary btn-sm text-xs" onclick="followKeyword('${esc(q.query)}','research')" title="Follow this keyword">📌</button>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>`
+
+    queriesSection = `
+      <div class="grid grid-cols-2 gap-4">
+        ${queryCard('Top Queries', '🔝', trend.top_queries)}
+        ${queryCard('Rising Queries', '🚀', trend.rising_queries)}
+      </div>`
+  }
+
+  // ── Keyword Ideas Table ──
+  let kwSection = ''
+  if (kwRes?.results?.length) {
+    const compColor = c => c < 30 ? 'text-green-600' : c < 70 ? 'text-yellow-600' : 'text-red-500'
+    const compLabel = c => c < 30 ? 'Low' : c < 70 ? 'Med' : 'High'
+    const volBar = v => {
+      const maxVol = Math.max(...kwRes.results.map(k => k.volume||0), 1)
+      const w = Math.round((v / maxVol) * 100)
+      return `<div class="flex items-center gap-2">
+        <div class="w-16 bg-gray-100 rounded-full h-1.5 overflow-hidden shrink-0">
+          <div class="h-1.5 rounded-full bg-indigo-400" style="width:${w}%"></div>
+        </div>
+        <span class="text-gray-700 font-medium">${(v||0).toLocaleString()}</span>
+      </div>`
+    }
+    kwSection = `
+      <div class="card">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="font-semibold text-gray-700">💡 Keyword Ideas</h3>
+            <p class="text-xs text-gray-400 mt-0.5">${kwRes.results.length} related keywords with search volume data</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="bulkFollowTrends('${esc(seedKw)}')">📌 Follow All Top 10</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="border-b border-gray-100 text-xs text-gray-400 uppercase">
+              <th class="text-left py-2 px-3">Keyword</th>
+              <th class="text-right py-2 px-3">Volume/mo</th>
+              <th class="text-center py-2 px-3">Competition</th>
+              <th class="text-right py-2 px-3">CPC</th>
+              <th class="py-2 px-3"></th>
+            </tr></thead>
+            <tbody>
+              ${kwRes.results.map(k => `
+                <tr class="border-b border-gray-50 table-row">
+                  <td class="py-2 px-3 font-medium text-gray-800">${esc(k.keyword)}</td>
+                  <td class="text-right py-2 px-3">${volBar(k.volume)}</td>
+                  <td class="text-center py-2 px-3">
+                    <span class="${compColor(k.competition)} text-xs font-medium">${compLabel(k.competition)}</span>
+                    <span class="text-gray-400 text-xs ml-1">${k.competition}</span>
+                  </td>
+                  <td class="text-right py-2 px-3 text-gray-600">$${k.cpc.toFixed(2)}</td>
+                  <td class="py-2 px-3">
+                    <div class="flex gap-1 action-btns">
+                      <button class="btn btn-secondary btn-sm" onclick="prefillRankingCheck('${esc(k.keyword)}')" title="Check rankings">→</button>
+                      <button class="btn btn-secondary btn-sm" onclick="followKeyword('${esc(k.keyword)}','research')" title="Follow">📌</button>
+                    </div>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`
+  }
+
+  if (!chartSection && !queriesSection && !kwSection) {
+    el.innerHTML = `<div class="card text-center py-10 text-gray-400">No data returned. Try a different keyword or country.</div>`
+    return
+  }
+
+  el.innerHTML = `<div class="space-y-4">${chartSection}${queriesSection}${kwSection}</div>`
+}
+
+async function bulkFollowTrends(seedKw) {
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  const kwRes = document.querySelectorAll('#trend-out tbody tr')
+  const keywords = Array.from(kwRes).slice(0, 10).map(tr => tr.querySelector('td')?.textContent?.trim()).filter(Boolean)
+  if (!keywords.length) return
+  try {
+    const res = await POST('/api/v1/tracking/follow/bulk', {
+      keywords, shop_domain: S.currentShop, source: 'research'
+    })
+    toast(`📌 Following ${res.followed} keywords`, 'success')
+  } catch(e) { toast('Bulk follow failed: ' + e.message, 'error') }
 }
 
 // ═══════════════════ KEYWORD TRACKING ════════════════════════
