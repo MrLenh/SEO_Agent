@@ -788,6 +788,7 @@ function _renderViewPost(id, p) {
   document.getElementById('modal-footer').innerHTML = `
     ${p.status === 'draft' ? `
       <button class="btn btn-success btn-sm" onclick="closeModal();openPublishModal(${id},'${esc(p.title)}')">🚀 Publish to Shopify</button>
+      <button class="btn btn-secondary btn-sm" onclick="viewPostAuditFix(${id})">📊 Audit & Fix</button>
       <button class="btn btn-secondary btn-sm" onclick="editPost(${id})">📝 Edit</button>
       <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5" onclick="confirmDeletePost(${id})">🗑 Delete</button>
     ` : ''}
@@ -1133,6 +1134,173 @@ async function doRegenerateImage(postId) {
 }
 
 // ─────────────────── Publish modal ────────────────────────────
+// ─────────────────── Inline Audit & Fix (view post modal) ─────
+async function viewPostAuditFix(postId) {
+  // Show audit section below the preview iframe
+  const auditSec = document.getElementById('vp-audit-section')
+  if (auditSec) { auditSec.scrollIntoView({behavior:'smooth'}); return }
+
+  // Inject the panel under the iframe
+  const previewDiv = document.querySelector('#preview-frame')?.parentElement
+  if (!previewDiv) return
+
+  const panel = document.createElement('div')
+  panel.id = 'vp-audit-section'
+  panel.className = 'mt-4 border-t pt-4'
+  panel.innerHTML = `
+    <div class="flex items-center justify-between mb-2">
+      <div class="text-sm font-semibold text-gray-700">📊 SEO Audit</div>
+      <div id="vp-audit-loading" class="text-xs text-gray-400 flex items-center gap-1"><span class="spinner-dark" style="width:14px;height:14px;border-width:2px"></span> Auditing…</div>
+    </div>
+    <div id="vp-audit-result"></div>`
+  previewDiv.after(panel)
+  panel.scrollIntoView({behavior:'smooth'})
+
+  // Run audit
+  try {
+    const audit = await GET(`/api/v1/audit/pre-publish/${postId}`)
+    document.getElementById('vp-audit-loading').remove()
+
+    const gradeColor = g => ({A:'text-green-600 bg-green-50 border-green-200',B:'text-blue-600 bg-blue-50 border-blue-200',C:'text-yellow-600 bg-yellow-50 border-yellow-200',D:'text-orange-600 bg-orange-50 border-orange-200',F:'text-red-600 bg-red-50 border-red-200'})[g]||'text-gray-600 bg-gray-50 border-gray-200'
+
+    const hasIssues = !audit.ready_to_publish || (audit.issues?.length || 0) > 0
+
+    document.getElementById('vp-audit-result').innerHTML = `
+      <div id="vp-audit-card" class="border rounded-xl p-3 space-y-2 ${audit.ready_to_publish ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-semibold ${audit.ready_to_publish ? 'text-green-700' : 'text-amber-700'}">
+            ${audit.ready_to_publish ? '✅ Article passed audit' : '⚠️ Issues found'}
+          </span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold border rounded-lg px-2 py-0.5 ${gradeColor(audit.grade)}">${audit.grade} · ${audit.score}/${audit.max_score}</span>
+            <span class="text-xs text-gray-400">${audit.word_count?.toLocaleString()} words</span>
+          </div>
+        </div>
+        ${audit.issues?.length ? `
+          <div class="space-y-1">
+            ${audit.issues.map(i=>`<div class="text-xs text-red-700 flex gap-1.5"><span>✗</span><span>${esc(i)}</span></div>`).join('')}
+          </div>` : ''}
+        ${audit.warnings?.length ? `
+          <div class="space-y-1">
+            ${audit.warnings.map(w=>`<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(w)}</span></div>`).join('')}
+          </div>` : ''}
+        <div class="flex items-center justify-between pt-1 gap-3">
+          <div class="flex gap-3 text-xs text-gray-500">
+            <span>H2: <strong>${audit.h2_count ?? '—'}</strong></span>
+            <span>🔗 Int: <strong>${audit.internal_link_count ?? '—'}</strong></span>
+            <span>🌐 Ext: <strong>${audit.external_link_count ?? '—'}</strong></span>
+          </div>
+          ${hasIssues ? `<button id="vp-fix-btn" class="btn btn-primary btn-sm shrink-0" onclick="viewPostFix(${postId})">🔧 AI Fix Issues</button>` : ''}
+        </div>
+      </div>`
+  } catch(e) {
+    document.getElementById('vp-audit-loading').textContent = 'Audit failed: ' + e.message
+  }
+}
+
+async function viewPostFix(postId) {
+  const fixBtn  = document.getElementById('vp-fix-btn')
+  const card    = document.getElementById('vp-audit-card')
+  if (!fixBtn || !card) return
+
+  fixBtn.disabled = true
+  fixBtn.innerHTML = '<span class="spinner"></span> Fixing…'
+
+  try {
+    const r = await POST(`/api/v1/audit/posts/${postId}/fix`, {})
+
+    if (!r.changed) {
+      card.innerHTML = `<div class="text-sm text-green-700 font-medium">✅ No issues — already optimised.</div>`
+      return
+    }
+
+    const gradeColor = g => ({A:'text-green-600 bg-green-50 border-green-200',B:'text-blue-600 bg-blue-50 border-blue-200',C:'text-yellow-600 bg-yellow-50 border-yellow-200',D:'text-orange-600 bg-orange-50 border-orange-200',F:'text-red-600 bg-red-50 border-red-200'})[g]||'text-gray-600'
+    const remaining = r.after.issues || []
+    const fixed = (r.before.issues||[]).filter(i=>!remaining.includes(i))
+
+    card.className = `border rounded-xl p-3 space-y-2 ${remaining.length===0 ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`
+    card.innerHTML = `
+      <div class="flex items-center justify-between">
+        <span class="text-sm font-semibold ${remaining.length===0 ? 'text-green-700' : 'text-amber-700'}">
+          ${remaining.length===0 ? '✅ All issues fixed!' : '⚠️ Partially fixed'}
+        </span>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-400 line-through">${r.before.grade} · ${r.before.score}</span>
+          <span class="text-xs">→</span>
+          <span class="text-xs font-bold border rounded-lg px-2 py-0.5 ${gradeColor(r.after.grade)}">${r.after.grade} · ${r.after.score}</span>
+        </div>
+      </div>
+      ${fixed.length ? `<div class="space-y-1">${fixed.map(i=>`<div class="text-xs text-green-700 flex gap-1.5"><span>✓</span><span>${esc(i)}</span></div>`).join('')}</div>` : ''}
+      ${remaining.length ? `
+        <div class="space-y-1">${remaining.map(i=>`<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(i)}</span></div>`).join('')}</div>
+        <button id="vp-fix-btn" class="btn btn-primary btn-sm" onclick="viewPostFix(${postId})">🔧 Fix Remaining</button>` : ''}
+      <div class="pt-1 flex gap-2">
+        <button class="btn btn-sm btn-secondary" onclick="viewPost(${postId})">↻ Reload Preview</button>
+      </div>`
+
+    toast('✅ Content fixed!', 'success')
+  } catch(e) {
+    fixBtn.disabled = false
+    fixBtn.innerHTML = '🔧 AI Fix Issues'
+    toast('Fix failed: ' + e.message, 'error')
+  }
+}
+
+// ─────────────────── AI Fix before publish ─────────────────────
+async function publishFix(postId) {
+  const fixBtn   = document.getElementById('pub-fix-btn')
+  const auditDiv = document.getElementById('pub-audit-block')
+  if (!fixBtn || !auditDiv) return
+
+  fixBtn.disabled = true
+  fixBtn.innerHTML = '<span class="spinner"></span> Fixing…'
+
+  try {
+    const r = await POST(`/api/v1/audit/posts/${postId}/fix`, {})
+
+    if (!r.changed) {
+      auditDiv.innerHTML = `
+        <div class="border border-green-200 bg-green-50 rounded-xl p-4 text-sm text-green-700 font-medium">
+          ✅ No issues found — article is already optimised.
+        </div>`
+      return
+    }
+
+    const gradeColor = g => ({A:'text-green-600 bg-green-50 border-green-200',B:'text-blue-600 bg-blue-50 border-blue-200',C:'text-yellow-600 bg-yellow-50 border-yellow-200',D:'text-orange-600 bg-orange-50 border-orange-200',F:'text-red-600 bg-red-50 border-red-200'})[g]||'text-gray-600'
+    const remaining = r.after.issues || []
+    const fixed = (r.before.issues || []).filter(i => !(r.after.issues||[]).includes(i))
+
+    auditDiv.innerHTML = `
+      <div class="border rounded-xl p-4 space-y-2 ${remaining.length === 0 ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-semibold ${remaining.length === 0 ? 'text-green-700' : 'text-amber-700'}">
+            ${remaining.length === 0 ? '✅ All issues fixed!' : '⚠️ Partially fixed — some issues remain'}
+          </span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-400 line-through">${r.before.grade} · ${r.before.score}</span>
+            <span class="text-xs text-gray-400">→</span>
+            <span class="text-xs font-bold border rounded-lg px-2 py-0.5 ${gradeColor(r.after.grade)}">${r.after.grade} · ${r.after.score}</span>
+          </div>
+        </div>
+        ${fixed.length ? `
+          <div class="space-y-1">
+            ${fixed.map(i=>`<div class="text-xs text-green-700 flex gap-1.5"><span>✓</span><span>${esc(i)}</span></div>`).join('')}
+          </div>` : ''}
+        ${remaining.length ? `
+          <div class="space-y-1">
+            ${remaining.map(i=>`<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(i)}</span></div>`).join('')}
+          </div>
+          <button id="pub-fix-btn" class="btn btn-primary btn-sm" onclick="publishFix(${postId})">🔧 Fix Remaining</button>` : ''}
+      </div>`
+
+    toast('✅ Content fixed!', 'success')
+  } catch(e) {
+    fixBtn.disabled = false
+    fixBtn.innerHTML = '🔧 AI Fix Issues'
+    toast('Fix failed: ' + e.message, 'error')
+  }
+}
+
 async function openPublishModal(postId, title) {
   // Step 1: show audit loading screen immediately
   openModal(`Publish: ${esc(title)}`,
@@ -1163,7 +1331,7 @@ async function openPublishModal(postId, title) {
   const gradeColor = g => ({A:'text-green-600 bg-green-50 border-green-200', B:'text-blue-600 bg-blue-50 border-blue-200', C:'text-yellow-600 bg-yellow-50 border-yellow-200', D:'text-orange-600 bg-orange-50 border-orange-200', F:'text-red-600 bg-red-50 border-red-200'})[g] || 'text-gray-600 bg-gray-50 border-gray-200'
 
   const auditBlock = audit ? `
-    <div class="border rounded-xl p-4 space-y-2 ${audit.ready_to_publish ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}">
+    <div id="pub-audit-block" class="border rounded-xl p-4 space-y-2 ${audit.ready_to_publish ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}">
       <div class="flex items-center justify-between">
         <div class="text-sm font-semibold ${audit.ready_to_publish ? 'text-green-700' : 'text-amber-700'}">
           ${audit.ready_to_publish ? '✅ Article passed audit' : '⚠️ Audit issues found'}
@@ -1185,10 +1353,16 @@ async function openPublishModal(postId, title) {
         <div class="text-xs text-gray-500 pt-1 border-t border-current border-opacity-20">
           <span class="font-medium">Semantic keywords:</span> ${sk.map(k => `<span class="inline-block bg-white border rounded px-1 mr-1 mb-1">${esc(k)}</span>`).join('')}
         </div>` : ''; })()}
-      <div class="flex gap-4 text-xs text-gray-500 pt-1">
-        <span>🔗 Internal: <strong>${audit.internal_link_count ?? '—'}</strong></span>
-        <span>🌐 External: <strong>${audit.external_link_count ?? '—'}</strong></span>
-        <span>H2: <strong>${audit.h2_count ?? '—'}</strong></span>
+      <div class="flex items-center justify-between pt-1 gap-3">
+        <div class="flex gap-4 text-xs text-gray-500">
+          <span>🔗 Internal: <strong>${audit.internal_link_count ?? '—'}</strong></span>
+          <span>🌐 External: <strong>${audit.external_link_count ?? '—'}</strong></span>
+          <span>H2: <strong>${audit.h2_count ?? '—'}</strong></span>
+        </div>
+        ${!audit.ready_to_publish ? `
+          <button id="pub-fix-btn" class="btn btn-primary btn-sm shrink-0" onclick="publishFix(${postId})">
+            🔧 AI Fix Issues
+          </button>` : ''}
       </div>
     </div>` : `<div class="text-xs text-gray-400 bg-gray-50 rounded-lg p-3">Audit unavailable — check audit scope permissions.</div>`
 
