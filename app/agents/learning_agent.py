@@ -116,36 +116,118 @@ class LearningAgent:
             return ""
 
     def _get_audit_data(self, shop_domain: str, db) -> str:
-        """Return brief summary of recent generated blog posts."""
+        """
+        Return actual audit issues from the KB (source_type='audit_result').
+        This gives the AI synthesizer concrete findings instead of just word counts.
+        """
         try:
-            from app.models.blog_post import BlogPost
-            from bs4 import BeautifulSoup
-            posts = (
-                db.query(BlogPost)
+            from app.models.knowledge_item import KnowledgeItem, KnowledgeStatus
+            items = (
+                db.query(KnowledgeItem)
                 .filter(
-                    BlogPost.shop_domain == shop_domain,
-                    BlogPost.source == "generated",
+                    KnowledgeItem.shop_domain == shop_domain,
+                    KnowledgeItem.source_type == "audit_result",
+                    KnowledgeItem.status == KnowledgeStatus.APPROVED,
                 )
-                .order_by(BlogPost.created_at.desc())
-                .limit(10)
+                .order_by(KnowledgeItem.created_at.desc())
+                .limit(20)
                 .all()
             )
-            if not posts:
+            if not items:
                 return ""
-            lines = []
-            for post in posts:
-                word_count = 0
-                if post.content_html:
-                    try:
-                        text = BeautifulSoup(post.content_html, "lxml").get_text(" ", strip=True)
-                        word_count = len(text.split())
-                    except Exception:
-                        word_count = len(post.content_html.split())
-                lines.append(f"'{post.title}' ({word_count} words)")
-            return "\n".join(lines)
+
+            # Extract individual issue/warning lines and deduplicate
+            seen: set[str] = set()
+            lines: list[str] = []
+            for item in items:
+                for raw_line in (item.content_text or "").splitlines():
+                    line = raw_line.strip()
+                    if not (line.startswith("- ISSUE:") or line.startswith("- WARNING:")):
+                        continue
+                    key = line.lower()
+                    if key not in seen:
+                        seen.add(key)
+                        lines.append(line)
+
+            if not lines:
+                return ""
+
+            return "Recurring SEO audit findings (across recent articles):\n" + "\n".join(lines[:40])
         except Exception as exc:
             logger.warning("LearningAgent._get_audit_data failed: %s", exc)
             return ""
+
+    # ── Lesson context for ContentWriter ──────────────────────────────────────
+
+    def get_lessons_context(self, shop_domain: str, db) -> str:
+        """
+        Return the most recent synthesized lessons formatted for direct injection
+        into the ContentWriter system prompt.
+        Called automatically by ContentWriter.write() to ensure lessons are applied
+        even when generating articles outside the full pipeline.
+        """
+        try:
+            from app.models.knowledge_item import KnowledgeItem, KnowledgeStatus
+            items = (
+                db.query(KnowledgeItem)
+                .filter(
+                    KnowledgeItem.shop_domain == shop_domain,
+                    KnowledgeItem.source_type == "lesson",
+                    KnowledgeItem.status == KnowledgeStatus.APPROVED,
+                )
+                .order_by(KnowledgeItem.created_at.desc())
+                .limit(3)   # Most recent 3 lesson batches
+                .all()
+            )
+            if not items:
+                return ""
+
+            seen: set[str] = set()
+            lessons: list[str] = []
+            for item in items:
+                for raw_line in (item.content_text or "").splitlines():
+                    line = raw_line.strip("- ").strip()
+                    if (line.startswith("✅") or line.startswith("⚠️")) and line not in seen:
+                        seen.add(line)
+                        lessons.append(line)
+
+            if not lessons:
+                return ""
+
+            return (
+                "\n\n━━━ LEARNING AGENT LESSONS — from past audits & feedback ━━━\n"
+                + "\n".join(f"• {l}" for l in lessons[:12])
+                + "\n━━━ END LESSONS — apply all of the above ━━━"
+            )
+        except Exception as exc:
+            logger.warning("LearningAgent.get_lessons_context failed: %s", exc)
+            return ""
+
+    # ── Record individual audit result ────────────────────────────────────────
+
+    def record_audit(self, audit: dict, shop_domain: str, db) -> None:
+        """
+        Save an AuditAgent result to the KB.
+        Called from the pipeline after each audit step so issues accumulate
+        and feed future lesson synthesis automatically.
+        """
+        try:
+            from app.services.seo_auditor import SeoAuditor
+            # Normalise the dict: AuditAgent may have different keys than SeoAuditor
+            normalised = {
+                "title":               audit.get("title", ""),
+                "focus_keyword":       audit.get("focus_keyword", ""),
+                "grade":               audit.get("grade", "?"),
+                "score":               audit.get("score", 0),
+                "word_count":          audit.get("programmatic", {}).get("word_count", 0),
+                "h2_count":            audit.get("programmatic", {}).get("h2_count", 0),
+                "internal_link_count": 0,
+                "issues":              audit.get("issues", []),
+                "warnings":            audit.get("warnings", []),
+            }
+            SeoAuditor().save_to_kb(normalised, shop_domain, db)
+        except Exception as exc:
+            logger.warning("LearningAgent.record_audit failed: %s", exc)
 
     # ── AI synthesis ──────────────────────────────────────────────────────────
 

@@ -184,6 +184,12 @@ class AgentPipeline:
                     "issues_count": len(audit_result.get("issues", [])),
                 })
 
+                # Persist audit findings to KB so Learning Agent accumulates them
+                self.learning.record_audit(
+                    {**audit_result, "title": title, "focus_keyword": keyword},
+                    shop_domain, db,
+                )
+
                 if audit_result.get("ready") or i == max_audit_iterations - 1:
                     break
 

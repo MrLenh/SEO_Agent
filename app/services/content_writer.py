@@ -3,6 +3,7 @@ SEO content writer powered by Claude.
 Writes full HTML articles with internal + external links.
 """
 import json
+import logging
 import re
 from datetime import datetime
 from typing import Optional
@@ -12,6 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.blog_post import BlogPost, Platform, PostStatus
+
+logger = logging.getLogger(__name__)
 
 
 class ContentWriter:
@@ -83,6 +86,35 @@ class ContentWriter:
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [p for _, p in scored[:5]]
+
+    # ── Word count helpers ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _count_words(html: str) -> int:
+        """Count visible words in HTML (strips tags first)."""
+        text = re.sub(r'<[^>]+>', ' ', html or '')
+        text = re.sub(r'\s+', ' ', text).strip()
+        return len(text.split()) if text else 0
+
+    def _word_targets_block(self, word_count: int, outline: list, paa_count: int) -> str:
+        """Build a prescriptive per-section word-count instruction for the prompt."""
+        n_sec   = max(1, len(outline))
+        faq_w   = max(120, min(350, paa_count * 65))
+        intro_w = max(120, int(word_count * 0.08))
+        conc_w  = max(100, int(word_count * 0.07))
+        body_w  = max(n_sec * 150, word_count - intro_w - conc_w - faq_w)
+        per_sec = max(150, body_w // n_sec)
+        return (
+            f"WORD COUNT — MANDATORY: Write exactly {word_count} words (±5%). "
+            f"Count every visible word.\n"
+            f"  • Introduction: ≥{intro_w} words\n"
+            f"  • Each of the {n_sec} H2 body section(s): ≥{per_sec} words "
+            f"(use examples, sub-points, data — no filler)\n"
+            f"  • FAQ ({paa_count} Qs): ≥{faq_w} words total\n"
+            f"  • Conclusion: ≥{conc_w} words\n"
+            f"  ▸ Finish each section before moving on. "
+            f"If a section is under its minimum, expand it with more depth."
+        )
 
     # ── Prompt builder ────────────────────────────────────────────────────────
 
@@ -212,7 +244,7 @@ class ContentWriter:
 
 Writing rules:
 - Write in {language} for the {market.upper()} market, tone: {tone_instruction}{type_ctx}
-- Target {word_count}+ words
+- {self._word_targets_block(word_count, outline, len(paa_questions))}
 - NEVER use <h1> tags — Shopify automatically generates H1 from the article title
 - Use focus keyword in: first 100 words, at least 2 <h2> headings, naturally throughout (2-3% density)
 - Structure: intro paragraph → <h2> sections → FAQ (from PAA) → conclusion paragraph
@@ -324,6 +356,17 @@ Respond in this exact format:
             except Exception:
                 pass
 
+        # Auto-inject Learning Agent lessons (from past audits & user feedback)
+        # Works even when writing outside the full pipeline (e.g. direct Generate)
+        if db and shop_domain:
+            try:
+                from app.agents.learning_agent import LearningAgent
+                lessons_ctx = LearningAgent().get_lessons_context(shop_domain, db)
+                if lessons_ctx:
+                    kb_context = (kb_context or "") + lessons_ctx
+            except Exception:
+                pass
+
         # Fetch live product data from Shopify (always fresh — never from local cache)
         products = []
         if db and shop_domain:
@@ -355,9 +398,13 @@ Respond in this exact format:
             {"role": "system", "content": system} if system.strip() else None,
             {"role": "user",   "content": user}   if user.strip()   else None,
         ] if m]
+
+        # Allow ~5 tokens per output word (HTML overhead) with a generous buffer
+        max_tokens = min(16000, max(4096, int(word_count * 5)))
+
         message = self.client.chat.completions.create(
             model=settings.OPENAI_MODEL,
-            max_tokens=5000,
+            max_tokens=max_tokens,
             messages=messages,
         )
 
@@ -368,6 +415,23 @@ Respond in this exact format:
         meta_match = re.search(r"<meta>\s*(\{.*?\})\s*</meta>", raw, re.DOTALL)
 
         content_html = article_match.group(1).strip() if article_match else raw
+
+        # Enforce word count: expand if AI wrote significantly less than requested
+        actual = self._count_words(content_html)
+        threshold = int(word_count * 0.88)
+        if actual < threshold:
+            logger.info(
+                "Word count short: got %d / %d requested — running expansion",
+                actual, word_count,
+            )
+            for attempt in range(2):
+                content_html = await self._expand_content(
+                    content_html, actual, word_count, focus_keyword, brand_profile
+                )
+                actual = self._count_words(content_html)
+                logger.info("Expansion attempt %d: now %d words", attempt + 1, actual)
+                if actual >= threshold:
+                    break
 
         meta = {}
         if meta_match:
@@ -403,6 +467,55 @@ Respond in this exact format:
                 "output_tokens": message.usage.completion_tokens,
             },
         }
+
+    # ── Content expansion ─────────────────────────────────────────────────────
+
+    async def _expand_content(
+        self,
+        html: str,
+        current_words: int,
+        target_words: int,
+        focus_keyword: str,
+        brand_profile: Optional[dict] = None,
+    ) -> str:
+        """Add genuine depth to an under-length article to hit the target word count."""
+        deficit = target_words - current_words
+        bp = brand_profile or {}
+        tone_hint = f"\nMaintain tone: {bp['tone_of_voice']}" if bp.get("tone_of_voice") else ""
+
+        resp = self.client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            max_tokens=min(16000, int(target_words * 5)),
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"You are an expert SEO content editor.{tone_hint}\n"
+                        "Expand articles to hit a precise word count — no padding."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f'This article about "{focus_keyword}" has {current_words} words '
+                        f"but must reach {target_words} words.\n\n"
+                        f"Add ≈{deficit} words by:\n"
+                        f"1. Expanding H2 sections under 150 words with depth, examples, or data\n"
+                        f"2. Lengthening FAQ answers that are under 80 words each\n"
+                        f"3. Adding one new relevant H2 section if body is still short\n\n"
+                        f"Rules:\n"
+                        f"- Return the COMPLETE expanded article HTML (all existing + new content)\n"
+                        f"- Keep all existing links, headings, and structure intact\n"
+                        f"- No filler: every added sentence must convey real information\n\n"
+                        f"Current article:\n{html}"
+                    ),
+                },
+            ],
+        )
+        expanded = resp.choices[0].message.content.strip()
+        # Strip accidental <article> wrapper if the model added one
+        m = re.search(r"<article>(.*?)</article>", expanded, re.DOTALL)
+        return m.group(1).strip() if m else expanded
 
     # ── Title suggestions ─────────────────────────────────────────────────────
 
@@ -465,6 +578,7 @@ Return ONLY a JSON array of {count} strings, no commentary. Example:
         instructions: str,
         brand_profile: Optional[dict] = None,
         feedback_lessons: Optional[list] = None,
+        target_word_count: Optional[int] = None,
     ) -> dict:
         """Rewrite an existing draft based on user instructions."""
         bp = brand_profile or {}
@@ -490,7 +604,17 @@ Return ONLY a JSON array of {count} strings, no commentary. Example:
             lessons_ctx = "\n\nLessons from past feedback (keep these in mind):\n"
             lessons_ctx += "\n".join(f"- {l}" for l in feedback_lessons)
 
-        system = f"""{rewrite_brand_block}You are an expert SEO content editor.{lessons_ctx}
+        orig_words = self._count_words(post.content_html or "")
+        wc_rule = ""
+        if target_word_count:
+            wc_rule = (
+                f"\n\nWORD COUNT — MANDATORY: The rewritten article MUST contain "
+                f"{target_word_count} words (±5%). Current: {orig_words} words. "
+                f"You must add ≈{max(0, target_word_count - orig_words)} words of genuine content. "
+                f"Count every visible word before finishing."
+            )
+
+        system = f"""{rewrite_brand_block}You are an expert SEO content editor.{lessons_ctx}{wc_rule}
 
 Your job is to rewrite the given article based on the user's instructions.
 Rules:
@@ -513,7 +637,13 @@ EXTERNAL LINKS — only 2 permitted uses:
 → Keep rel="noopener noreferrer" on all retained external links
 ━━━ END LINK STRATEGY ━━━"""
 
-        user = f"""Rewrite this article based on the instructions below.
+        wc_note = (
+            f"\n**Word count target: {target_word_count} words "
+            f"(current: {orig_words} words — add ≈{max(0, target_word_count - orig_words)} words)**"
+            if target_word_count else ""
+        )
+
+        user = f"""Rewrite this article based on the instructions below.{wc_note}
 
 **Rewrite instructions:**
 {instructions}
@@ -539,9 +669,12 @@ Respond in this exact format:
             {"role": "system", "content": system} if system.strip() else None,
             {"role": "user",   "content": user}   if user.strip()   else None,
         ] if m]
+        # Need tokens for target size (not just original) when expanding
+        effective_words = max(orig_words, target_word_count or 0)
+        rw_max_tokens   = min(16000, max(4096, int(effective_words * 5)))
         message = self.client.chat.completions.create(
             model=settings.OPENAI_MODEL,
-            max_tokens=5000,
+            max_tokens=rw_max_tokens,
             messages=rw_messages,
         )
         raw = message.choices[0].message.content
@@ -549,6 +682,25 @@ Respond in this exact format:
         meta_match    = re.search(r"<meta>\s*(\{.*?\})\s*</meta>", raw, re.DOTALL)
 
         content_html = article_match.group(1).strip() if article_match else raw
+
+        # Expansion loop: if word count is still short after rewrite, expand
+        if target_word_count:
+            actual = self._count_words(content_html)
+            threshold = int(target_word_count * 0.88)
+            if actual < threshold:
+                logger.info(
+                    "Rewrite word count short: got %d / %d — running expansion",
+                    actual, target_word_count,
+                )
+                for attempt in range(2):
+                    content_html = await self._expand_content(
+                        content_html, actual, target_word_count,
+                        post.focus_keyword or "", brand_profile
+                    )
+                    actual = self._count_words(content_html)
+                    logger.info("Rewrite expansion attempt %d: now %d words", attempt + 1, actual)
+                    if actual >= threshold:
+                        break
         meta = {}
         if meta_match:
             try:

@@ -1,6 +1,12 @@
+import logging
 import re
+from datetime import datetime
+from typing import Optional
+
 from bs4 import BeautifulSoup
 from app.models.blog_post import BlogPost
+
+logger = logging.getLogger(__name__)
 
 _CTA_PHRASES = re.compile(
     r'\b(learn more|read more|discover|explore|find out|check out|see more|click here|view more|get more)\b',
@@ -134,6 +140,11 @@ class SeoAuditor:
         else:
             warnings.append("No semantic keyword set — regenerate article to build topic authority keywords")
 
+        # Total possible raw points: 20+15+30+15+10+5+15+5 = 115
+        # Normalize to 100 and cap so score never exceeds max
+        MAX_RAW = 115
+        normalized = min(100, round(score * 100 / MAX_RAW))
+
         return {
             "post_id": post.id,
             "title": title,
@@ -149,9 +160,53 @@ class SeoAuditor:
             "external_link_count": len(external_links),
             "cta_external_leaks": cta_external_leaks,
             "semantic_keywords": semantic_kws,
-            "score": score,
+            "score": normalized,
             "max_score": 100,
-            "grade": "A" if score >= 85 else "B" if score >= 70 else "C" if score >= 55 else "D" if score >= 40 else "F",
+            "grade": "A" if normalized >= 85 else "B" if normalized >= 70 else "C" if normalized >= 55 else "D" if normalized >= 40 else "F",
             "issues": issues,
             "warnings": warnings,
         }
+
+    # ── KB persistence ────────────────────────────────────────────────────────
+
+    def save_to_kb(self, audit: dict, shop_domain: Optional[str], db) -> None:
+        """
+        Save audit issues/warnings to the Knowledge Base so the Learning Agent
+        can include them when synthesizing writing lessons.
+        No-ops silently when KB is unavailable or audit has no findings.
+        """
+        if not (audit.get("issues") or audit.get("warnings")):
+            return
+        try:
+            from app.services.knowledge_base import KnowledgeBase
+
+            article_title = (audit.get("title") or "Unknown article")[:60]
+            kw            = audit.get("focus_keyword", "")
+            date_str      = datetime.utcnow().strftime("%Y-%m-%d")
+
+            issue_lines   = "\n".join(f"- ISSUE: {i}"   for i in audit.get("issues",   []))
+            warning_lines = "\n".join(f"- WARNING: {w}" for w in audit.get("warnings", []))
+
+            summary = (
+                f"SEO Audit — {article_title}\n"
+                f"Keyword: {kw} | Score: {audit.get('grade','?')} {audit.get('score',0)}/100 | "
+                f"Words: {audit.get('word_count', 0)} | "
+                f"H2: {audit.get('h2_count', 0)} | "
+                f"Int.links: {audit.get('internal_link_count', 0)}"
+            )
+            if issue_lines:
+                summary += f"\n{issue_lines}"
+            if warning_lines:
+                summary += f"\n{warning_lines}"
+
+            KnowledgeBase().add_from_text(
+                title=f"SEO Audit Issues — {article_title} ({date_str})",
+                content_text=summary,
+                content_md=f"# SEO Audit Issues\n\n```\n{summary}\n```",
+                source_type="audit_result",
+                shop_domain=shop_domain,
+                db=db,
+                auto_approve=True,
+            )
+        except Exception as exc:
+            logger.warning("SeoAuditor.save_to_kb failed: %s", exc)
