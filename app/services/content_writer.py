@@ -567,6 +567,7 @@ Return ONLY a JSON array of {count} strings, no commentary. Example:
         instructions: str,
         brand_profile: Optional[dict] = None,
         feedback_lessons: Optional[list] = None,
+        target_word_count: Optional[int] = None,
     ) -> dict:
         """Rewrite an existing draft based on user instructions."""
         bp = brand_profile or {}
@@ -592,7 +593,17 @@ Return ONLY a JSON array of {count} strings, no commentary. Example:
             lessons_ctx = "\n\nLessons from past feedback (keep these in mind):\n"
             lessons_ctx += "\n".join(f"- {l}" for l in feedback_lessons)
 
-        system = f"""{rewrite_brand_block}You are an expert SEO content editor.{lessons_ctx}
+        orig_words = self._count_words(post.content_html or "")
+        wc_rule = ""
+        if target_word_count:
+            wc_rule = (
+                f"\n\nWORD COUNT — MANDATORY: The rewritten article MUST contain "
+                f"{target_word_count} words (±5%). Current: {orig_words} words. "
+                f"You must add ≈{max(0, target_word_count - orig_words)} words of genuine content. "
+                f"Count every visible word before finishing."
+            )
+
+        system = f"""{rewrite_brand_block}You are an expert SEO content editor.{lessons_ctx}{wc_rule}
 
 Your job is to rewrite the given article based on the user's instructions.
 Rules:
@@ -615,7 +626,13 @@ EXTERNAL LINKS — only 2 permitted uses:
 → Keep rel="noopener noreferrer" on all retained external links
 ━━━ END LINK STRATEGY ━━━"""
 
-        user = f"""Rewrite this article based on the instructions below.
+        wc_note = (
+            f"\n**Word count target: {target_word_count} words "
+            f"(current: {orig_words} words — add ≈{max(0, target_word_count - orig_words)} words)**"
+            if target_word_count else ""
+        )
+
+        user = f"""Rewrite this article based on the instructions below.{wc_note}
 
 **Rewrite instructions:**
 {instructions}
@@ -641,9 +658,9 @@ Respond in this exact format:
             {"role": "system", "content": system} if system.strip() else None,
             {"role": "user",   "content": user}   if user.strip()   else None,
         ] if m]
-        # Give enough room to reproduce the original article plus additions
-        orig_words    = self._count_words(post.content_html or "")
-        rw_max_tokens = min(16000, max(4096, int(orig_words * 5)))
+        # Need tokens for target size (not just original) when expanding
+        effective_words = max(orig_words, target_word_count or 0)
+        rw_max_tokens   = min(16000, max(4096, int(effective_words * 5)))
         message = self.client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             max_tokens=rw_max_tokens,
@@ -654,6 +671,25 @@ Respond in this exact format:
         meta_match    = re.search(r"<meta>\s*(\{.*?\})\s*</meta>", raw, re.DOTALL)
 
         content_html = article_match.group(1).strip() if article_match else raw
+
+        # Expansion loop: if word count is still short after rewrite, expand
+        if target_word_count:
+            actual = self._count_words(content_html)
+            threshold = int(target_word_count * 0.88)
+            if actual < threshold:
+                logger.info(
+                    "Rewrite word count short: got %d / %d — running expansion",
+                    actual, target_word_count,
+                )
+                for attempt in range(2):
+                    content_html = await self._expand_content(
+                        content_html, actual, target_word_count,
+                        post.focus_keyword or "", brand_profile
+                    )
+                    actual = self._count_words(content_html)
+                    logger.info("Rewrite expansion attempt %d: now %d words", attempt + 1, actual)
+                    if actual >= threshold:
+                        break
         meta = {}
         if meta_match:
             try:

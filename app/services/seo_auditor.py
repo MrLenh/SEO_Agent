@@ -134,6 +134,11 @@ class SeoAuditor:
         else:
             warnings.append("No semantic keyword set — regenerate article to build topic authority keywords")
 
+        # Total possible raw points: 20+15+30+15+10+5+15+5 = 115
+        # Normalize to 100 and cap so score never exceeds max
+        MAX_RAW = 115
+        normalized = min(100, round(score * 100 / MAX_RAW))
+
         return {
             "post_id": post.id,
             "title": title,
@@ -149,9 +154,9 @@ class SeoAuditor:
             "external_link_count": len(external_links),
             "cta_external_leaks": cta_external_leaks,
             "semantic_keywords": semantic_kws,
-            "score": score,
+            "score": normalized,
             "max_score": 100,
-            "grade": "A" if score >= 85 else "B" if score >= 70 else "C" if score >= 55 else "D" if score >= 40 else "F",
+            "grade": "A" if normalized >= 85 else "B" if normalized >= 70 else "C" if normalized >= 55 else "D" if normalized >= 40 else "F",
             "issues": issues,
             "warnings": warnings,
         }
