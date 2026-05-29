@@ -141,10 +141,20 @@ class ContentWriter:
 
         internal_ctx = ""
         if internal_posts:
-            internal_ctx = "\n\nAvailable internal links — use 2–3 of these for navigational phrases:\n"
+            internal_ctx = "\n\nAvailable internal links — embed 2–3 of these naturally in the body:\n"
             for p in internal_posts:
                 url = p.platform_url or f"/blogs/news/{p.slug}"
                 internal_ctx += f'- <a href="{url}">{p.title}</a>\n'
+        else:
+            # No published posts yet — provide generic store URL patterns
+            kw_slug = re.sub(r"[^a-z0-9]+", "-", focus_keyword.lower()).strip("-")
+            internal_ctx = (
+                "\n\nNo existing articles found. Add 2 internal links using these Shopify URL patterns:\n"
+                f'- <a href="/blogs/news/{kw_slug}-guide">explore our guides</a>\n'
+                '- <a href="/collections/all">shop our full range</a>\n'
+                '- <a href="/pages/about">learn about us</a>\n'
+                "Use these patterns (or similar) naturally in the article body."
+            )
 
         external_ctx = ""
         _ALLOWED_DOMAINS = ("wikipedia.org", "who.int", "nih.gov", "cdc.gov", "usda.gov",
@@ -245,7 +255,7 @@ Writing rules:
 - Write in {language} for the {market.upper()} market, tone: {tone_instruction}{type_ctx}
 - {self._word_targets_block(word_count, outline, len(paa_questions))}
 - NEVER use <h1> tags — Shopify automatically generates H1 from the article title
-- Use focus keyword in: first 100 words, at least 2 <h2> headings, naturally throughout (2-3% density)
+- Use focus keyword in: first 100 words, at least 2 <h2> headings, and {max(10, int(word_count * 0.015))} times total across the article (≈1.5% density — count carefully before finishing)
 - Structure: intro paragraph → <h2> sections → FAQ (from PAA) → conclusion paragraph
 - Use proper HTML tags: <h2>, <h3>, <p>, <ul>, <li>, <strong>
 - Never use <html>, <head>, <body> tags
@@ -441,7 +451,7 @@ Respond in this exact format:
         internal_links_used = [p.id for p in internal_posts]
         image_prompt = meta.get("image_prompt", f"Professional blog banner about {focus_keyword}")
 
-        # Generate featured image immediately so the user can review it
+        # Generate featured image and embed it in the article body
         image_url = None
         try:
             from app.services.image_generator import ImageGenerator
@@ -449,6 +459,20 @@ Respond in this exact format:
             image_url = img.get("url")
         except Exception:
             pass
+
+        # Inject the banner image after the first paragraph so SeoAuditor
+        # can count it and Shopify renders it inside the article body
+        if image_url:
+            img_tag = (
+                f'<figure class="article-banner" style="margin:0 0 1.5em">'
+                f'<img src="{image_url}" alt="{focus_keyword}" '
+                f'style="width:100%;max-width:900px;height:auto;border-radius:6px" loading="lazy">'
+                f'</figure>'
+            )
+            if '</p>' in content_html:
+                content_html = content_html.replace('</p>', f'</p>\n{img_tag}', 1)
+            else:
+                content_html = img_tag + '\n' + content_html
 
         return {
             "content_html": content_html,

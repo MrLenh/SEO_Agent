@@ -852,7 +852,8 @@ function edGetContent() {
 }
 
 async function editPost(id) {
-  const p = await GET(`/api/v1/generate/article/${id}/content`).catch(e => { toast(e.message,'error'); return null })
+  openModal('Edit Draft', `<div class="flex items-center justify-center py-12"><div class="spinner-dark"></div></div>`)
+  const p = await GET(`/api/v1/generate/article/${id}/content`).catch(e => { toast(e.message,'error'); closeModal(); return null })
   if (!p) return
   document.getElementById('modal-title').textContent = 'Edit Draft'
   document.getElementById('modal-body').innerHTML = `

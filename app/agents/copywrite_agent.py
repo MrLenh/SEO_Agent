@@ -217,6 +217,33 @@ class CopywriteAgent:
                 "include it naturally — do not alter anything else."
             )
 
+        # Keyword density too low
+        density = prog.get("keyword_density", 0)
+        if density < 1.0 and keyword:
+            target_count = max(10, int(target_word_count * 0.015))
+            fixes.append(
+                f"KEYWORD DENSITY — CRITICAL: '{keyword}' appears only {density:.1f}% of the time. "
+                f"Increase to at least 1.5% by using the keyword approximately {target_count} times "
+                "throughout the article — in headings, body paragraphs, and FAQ answers."
+            )
+
+        # No images
+        if prog.get("img_count", 0) == 0:
+            fixes.append(
+                "IMAGES — CRITICAL: Add at least 1 relevant image with descriptive alt text. "
+                "Insert an <img> tag with a meaningful alt attribute in the article body."
+            )
+
+        # No internal links
+        if prog.get("internal_link_count", 0) == 0:
+            fixes.append(
+                "INTERNAL LINKS — CRITICAL: Add 2 internal links to related content. "
+                "Use patterns like: "
+                f'<a href="/blogs/news/{keyword.lower().replace(" ", "-")}-guide">related guide</a> '
+                'or <a href="/collections/all">shop our products</a>. '
+                "Place them naturally on navigational phrases in the body."
+            )
+
         # FAQ missing
         if not prog.get("has_faq"):
             fixes.append(
