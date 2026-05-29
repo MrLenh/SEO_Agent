@@ -45,7 +45,7 @@ class AgentPipeline:
         market: str = "us",
         article_type: Optional[str] = None,
         notes: Optional[str] = None,
-        max_audit_iterations: int = 2,
+        max_audit_iterations: int = 3,
     ) -> dict:
         """
         Run the full multi-agent SEO content pipeline.
@@ -205,6 +205,47 @@ class AgentPipeline:
                 _update(f"copywrite_revision_{i + 1}", "done", {
                     "revision": i + 1,
                 })
+
+            # ── Surgical fix — targeted pass if still not ready ───────────────
+            if not audit_result.get("ready"):
+                _update("surgical_fix", "running")
+                article = await self.copywrite.surgical_fix(
+                    article=article,
+                    audit_result=audit_result,
+                    target_word_count=word_count,
+                    db=db,
+                    brand_profile=brand_profile,
+                )
+                # Final verification audit after surgical fix
+                audit_result = await self.audit.audit(
+                    article_html=article.get("content_html", ""),
+                    seo_title=article.get("seo_title", title),
+                    focus_keyword=keyword,
+                    target_keywords=ranked_kws,
+                    paa_questions=paa,
+                )
+                self.learning.record_audit(
+                    {**audit_result, "title": title, "focus_keyword": keyword},
+                    shop_domain, db,
+                )
+                _update("surgical_fix", "done", {
+                    "score": audit_result.get("score"),
+                    "grade": audit_result.get("grade"),
+                    "ready": audit_result.get("ready"),
+                })
+
+            # ── Final DB save — persist latest article state ──────────────────
+            try:
+                from app.models.blog_post import BlogPost as _BP
+                _post = db.query(_BP).filter(_BP.id == post_id).first()
+                if _post:
+                    _post.content_html      = article.get("content_html",    _post.content_html)
+                    _post.seo_title         = article.get("seo_title",       _post.seo_title)
+                    _post.seo_description   = article.get("seo_description", _post.seo_description)
+                    _post.tags              = article.get("tags",            _post.tags)
+                    db.commit()
+            except Exception as exc:
+                logger.warning("Pipeline: final article save failed: %s", exc)
 
             seo_title = article.get("seo_title", title)
 

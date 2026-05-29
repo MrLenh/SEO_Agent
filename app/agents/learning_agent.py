@@ -7,9 +7,7 @@ import logging
 from datetime import date, datetime
 from typing import Optional
 
-from openai import OpenAI
-
-from app.config import settings
+from app.agents.base import get_client, get_model
 from app.services.knowledge_base import KnowledgeBase
 
 logger = logging.getLogger(__name__)
@@ -17,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class LearningAgent:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = get_client()
 
     # ── Keyword context ───────────────────────────────────────────────────────
 
@@ -233,11 +231,7 @@ class LearningAgent:
 
     async def _synthesize(self, feedback: str, rankings: str, audit_data: str) -> list[str]:
         """Use AI to extract actionable writing lessons from performance data."""
-        model = (
-            getattr(settings, "OPENAI_MODEL_SMART", "") or
-            settings.OPENAI_MODEL or
-            "gpt-4o"
-        )
+        model = get_model("learning")
 
         sections = []
         if feedback:
@@ -311,11 +305,7 @@ class LearningAgent:
         db,
     ) -> dict:
         """Simulate an expert user reviewing the article based on past feedback patterns."""
-        model = (
-            getattr(settings, "OPENAI_MODEL_SMART", "") or
-            settings.OPENAI_MODEL or
-            "gpt-4o"
-        )
+        model = get_model("learning")
 
         feedback_patterns = self._get_feedback_data(shop_domain, db)
         article_preview = article_html[:2000]

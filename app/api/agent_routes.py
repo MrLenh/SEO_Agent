@@ -38,7 +38,7 @@ class PipelineRunRequest(BaseModel):
     target_platform: str = "google"
     article_type: Optional[str] = None
     notes: Optional[str] = None
-    max_audit_iterations: int = 2
+    max_audit_iterations: int = 3
 
 
 class ResearchRequest(BaseModel):

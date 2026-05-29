@@ -852,7 +852,8 @@ function edGetContent() {
 }
 
 async function editPost(id) {
-  const p = await GET(`/api/v1/generate/article/${id}/content`).catch(e => { toast(e.message,'error'); return null })
+  openModal('Edit Draft', `<div class="flex items-center justify-center py-12"><div class="spinner-dark"></div></div>`)
+  const p = await GET(`/api/v1/generate/article/${id}/content`).catch(e => { toast(e.message,'error'); closeModal(); return null })
   if (!p) return
   document.getElementById('modal-title').textContent = 'Edit Draft'
   document.getElementById('modal-body').innerHTML = `
@@ -4028,6 +4029,13 @@ function renderPipelineResult(r) {
           ${(audit.issues||[]).map(i => `<div class="text-xs text-red-700 flex gap-1.5"><span>✗</span><span>${esc(i)}</span></div>`).join('')}
           ${(audit.warnings||[]).map(w => `<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(w)}</span></div>`).join('')}
         </div>` : ''}
+
+      <!-- Action buttons -->
+      ${r.post_id ? `
+        <div class="flex gap-2 pt-2 border-t border-gray-100">
+          <button class="btn btn-secondary btn-sm" onclick="editPost(${r.post_id})">📝 View &amp; Edit Draft</button>
+          <button class="btn btn-primary btn-sm" onclick="openPublishModal(${r.post_id},'')">🚀 Publish</button>
+        </div>` : ''}
     </div>`
 }
 
@@ -4062,7 +4070,8 @@ async function loadPipelineRuns() {
             <td class="py-2">
               <div class="flex gap-1 action-btns">
                 <button class="btn btn-secondary btn-sm" onclick="viewPipelineRun(${r.id})">Details</button>
-                ${r.post_id ? `<button class="btn btn-secondary btn-sm" onclick="openPublishModal(${r.post_id},'')">Publish</button>` : ''}
+                ${r.post_id ? `<button class="btn btn-secondary btn-sm" onclick="editPost(${r.post_id})">📝 Draft</button>` : ''}
+                ${r.post_id ? `<button class="btn btn-primary btn-sm" onclick="openPublishModal(${r.post_id},'')">Publish</button>` : ''}
               </div>
             </td>
           </tr>`).join('')}
@@ -4096,6 +4105,7 @@ async function viewPipelineRun(runId) {
         </div>
       </div>`,
       `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>
+       ${run.post_id ? `<button class="btn btn-secondary btn-sm" onclick="closeModal();editPost(${run.post_id})">📝 View &amp; Edit Draft</button>` : ''}
        ${run.post_id ? `<button class="btn btn-primary btn-sm" onclick="closeModal();openPublishModal(${run.post_id},'')">🚀 Publish Article</button>` : ''}`
     )
   } catch(e) { toast('Failed to load run: ' + e.message, 'error') }

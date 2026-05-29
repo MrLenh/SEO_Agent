@@ -7,9 +7,7 @@ import logging
 import time
 from typing import Optional
 
-from openai import OpenAI
-
-from app.config import settings
+from app.agents.base import get_client, get_model
 from app.services.keyword_analyzer import KeywordAnalyzer
 from app.services.volume_service import get_search_volumes, is_configured as dataforseo_configured
 from app.api.trends_routes import LOCATION_CODES
@@ -19,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class ResearchAgent:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = get_client()
 
     async def run(
         self,
@@ -85,7 +83,7 @@ class ResearchAgent:
         serp_data: dict,
         kb_context: str,
     ) -> dict:
-        model = getattr(settings, "OPENAI_MODEL_FAST", "") or settings.OPENAI_MODEL
+        model = get_model("research")
 
         # Build keyword volume table
         kw_lines = []

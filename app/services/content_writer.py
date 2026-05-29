@@ -8,10 +8,9 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from openai import OpenAI
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.agents.base import get_client, get_model, build_messages
 from app.models.blog_post import BlogPost, Platform, PostStatus
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 class ContentWriter:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = get_client()
 
     # ── Product helpers ───────────────────────────────────────────────────────
 
@@ -142,10 +141,20 @@ class ContentWriter:
 
         internal_ctx = ""
         if internal_posts:
-            internal_ctx = "\n\nAvailable internal links — use 2–3 of these for navigational phrases:\n"
+            internal_ctx = "\n\nAvailable internal links — embed 2–3 of these naturally in the body:\n"
             for p in internal_posts:
                 url = p.platform_url or f"/blogs/news/{p.slug}"
                 internal_ctx += f'- <a href="{url}">{p.title}</a>\n'
+        else:
+            # No published posts yet — provide generic store URL patterns
+            kw_slug = re.sub(r"[^a-z0-9]+", "-", focus_keyword.lower()).strip("-")
+            internal_ctx = (
+                "\n\nNo existing articles found. Add 2 internal links using these Shopify URL patterns:\n"
+                f'- <a href="/blogs/news/{kw_slug}-guide">explore our guides</a>\n'
+                '- <a href="/collections/all">shop our full range</a>\n'
+                '- <a href="/pages/about">learn about us</a>\n'
+                "Use these patterns (or similar) naturally in the article body."
+            )
 
         external_ctx = ""
         _ALLOWED_DOMAINS = ("wikipedia.org", "who.int", "nih.gov", "cdc.gov", "usda.gov",
@@ -246,7 +255,7 @@ Writing rules:
 - Write in {language} for the {market.upper()} market, tone: {tone_instruction}{type_ctx}
 - {self._word_targets_block(word_count, outline, len(paa_questions))}
 - NEVER use <h1> tags — Shopify automatically generates H1 from the article title
-- Use focus keyword in: first 100 words, at least 2 <h2> headings, naturally throughout (2-3% density)
+- Use focus keyword in: first 100 words, at least 2 <h2> headings, and {max(10, int(word_count * 0.015))} times total across the article (≈1.5% density — count carefully before finishing)
 - Structure: intro paragraph → <h2> sections → FAQ (from PAA) → conclusion paragraph
 - Use proper HTML tags: <h2>, <h3>, <p>, <ul>, <li>, <strong>
 - Never use <html>, <head>, <body> tags
@@ -394,16 +403,14 @@ Respond in this exact format:
             platform_guideline=platform_guideline,
         )
 
-        messages = [m for m in [
-            {"role": "system", "content": system} if system.strip() else None,
-            {"role": "user",   "content": user}   if user.strip()   else None,
-        ] if m]
+        model = get_model("copywrite")
+        messages = build_messages(system, user, model)
 
         # Allow ~5 tokens per output word (HTML overhead) with a generous buffer
         max_tokens = min(16000, max(4096, int(word_count * 5)))
 
         message = self.client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
+            model=model,
             max_tokens=max_tokens,
             messages=messages,
         )
@@ -444,7 +451,7 @@ Respond in this exact format:
         internal_links_used = [p.id for p in internal_posts]
         image_prompt = meta.get("image_prompt", f"Professional blog banner about {focus_keyword}")
 
-        # Generate featured image immediately so the user can review it
+        # Generate featured image and embed it in the article body
         image_url = None
         try:
             from app.services.image_generator import ImageGenerator
@@ -452,6 +459,20 @@ Respond in this exact format:
             image_url = img.get("url")
         except Exception:
             pass
+
+        # Inject the banner image after the first paragraph so SeoAuditor
+        # can count it and Shopify renders it inside the article body
+        if image_url:
+            img_tag = (
+                f'<figure class="article-banner" style="margin:0 0 1.5em">'
+                f'<img src="{image_url}" alt="{focus_keyword}" '
+                f'style="width:100%;max-width:900px;height:auto;border-radius:6px" loading="lazy">'
+                f'</figure>'
+            )
+            if '</p>' in content_html:
+                content_html = content_html.replace('</p>', f'</p>\n{img_tag}', 1)
+            else:
+                content_html = img_tag + '\n' + content_html
 
         return {
             "content_html": content_html,
@@ -483,34 +504,28 @@ Respond in this exact format:
         bp = brand_profile or {}
         tone_hint = f"\nMaintain tone: {bp['tone_of_voice']}" if bp.get("tone_of_voice") else ""
 
+        model = get_model("copywrite")
+        expand_system = (
+            f"You are an expert SEO content editor.{tone_hint}\n"
+            "Expand articles to hit a precise word count — no padding."
+        )
+        expand_user = (
+            f'This article about "{focus_keyword}" has {current_words} words '
+            f"but must reach {target_words} words.\n\n"
+            f"Add ≈{deficit} words by:\n"
+            f"1. Expanding H2 sections under 150 words with depth, examples, or data\n"
+            f"2. Lengthening FAQ answers that are under 80 words each\n"
+            f"3. Adding one new relevant H2 section if body is still short\n\n"
+            f"Rules:\n"
+            f"- Return the COMPLETE expanded article HTML (all existing + new content)\n"
+            f"- Keep all existing links, headings, and structure intact\n"
+            f"- No filler: every added sentence must convey real information\n\n"
+            f"Current article:\n{html}"
+        )
         resp = self.client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
+            model=model,
             max_tokens=min(16000, int(target_words * 5)),
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        f"You are an expert SEO content editor.{tone_hint}\n"
-                        "Expand articles to hit a precise word count — no padding."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f'This article about "{focus_keyword}" has {current_words} words '
-                        f"but must reach {target_words} words.\n\n"
-                        f"Add ≈{deficit} words by:\n"
-                        f"1. Expanding H2 sections under 150 words with depth, examples, or data\n"
-                        f"2. Lengthening FAQ answers that are under 80 words each\n"
-                        f"3. Adding one new relevant H2 section if body is still short\n\n"
-                        f"Rules:\n"
-                        f"- Return the COMPLETE expanded article HTML (all existing + new content)\n"
-                        f"- Keep all existing links, headings, and structure intact\n"
-                        f"- No filler: every added sentence must convey real information\n\n"
-                        f"Current article:\n{html}"
-                    ),
-                },
-            ],
+            messages=build_messages(expand_system, expand_user, model),
         )
         expanded = resp.choices[0].message.content.strip()
         # Strip accidental <article> wrapper if the model added one
@@ -551,14 +566,11 @@ Rules:
 Return ONLY a JSON array of {count} strings, no commentary. Example:
 ["Best Wireless Earbuds for Running in 2025", "How to Pick Running Earbuds That Don't Fall Out"]"""
 
-        sg_messages = [m for m in [
-            {"role": "system", "content": system} if system.strip() else None,
-            {"role": "user",   "content": user}   if user.strip()   else None,
-        ] if m]
+        model = get_model("copywrite")
         message = self.client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
+            model=model,
             max_tokens=600,
-            messages=sg_messages,
+            messages=build_messages(system, user, model),
         )
         raw = (message.choices[0].message.content or "").strip()
         match = re.search(r"\[.*\]", raw, re.DOTALL)
@@ -665,17 +677,14 @@ Respond in this exact format:
 {{"seo_title": "60-char SEO title", "meta_description": "155-char description with keyword", "tags": ["tag1","tag2","tag3"], "image_prompt": "DALL-E prompt for a professional blog banner"}}
 </meta>"""
 
-        rw_messages = [m for m in [
-            {"role": "system", "content": system} if system.strip() else None,
-            {"role": "user",   "content": user}   if user.strip()   else None,
-        ] if m]
+        model = get_model("copywrite")
         # Need tokens for target size (not just original) when expanding
         effective_words = max(orig_words, target_word_count or 0)
         rw_max_tokens   = min(16000, max(4096, int(effective_words * 5)))
         message = self.client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
+            model=model,
             max_tokens=rw_max_tokens,
-            messages=rw_messages,
+            messages=build_messages(system, user, model),
         )
         raw = message.choices[0].message.content
         article_match = re.search(r"<article>(.*?)</article>", raw, re.DOTALL)

@@ -177,3 +177,136 @@ class CopywriteAgent:
                 logger.warning("CopywriteAgent: failed to update DB record %s: %s", article_id, exc)
 
         return {**article, **rewrite_result}
+
+    async def surgical_fix(
+        self,
+        article: dict,
+        audit_result: dict,
+        target_word_count: int,
+        db,
+        brand_profile: Optional[dict] = None,
+    ) -> dict:
+        """Apply precise, targeted fixes for specific programmatic audit failures.
+
+        Unlike a general rewrite, this method builds an explicit instruction for
+        each failing check so the model applies only the minimal changes needed to
+        push the article over the ready threshold.
+        """
+        prog = audit_result.get("programmatic", {})
+        current_words = prog.get("word_count", 0)
+        keyword = article.get("focus_keyword", "")
+        issues = audit_result.get("issues", [])
+
+        fixes: list[str] = []
+
+        # Word count
+        if current_words < int(target_word_count * 0.90):
+            deficit = target_word_count - current_words
+            fixes.append(
+                f"WORD COUNT — CRITICAL: Article has {current_words} words but must reach "
+                f"{target_word_count}. Add exactly {deficit} words by expanding existing H2 "
+                "sections (each under 200 words) and lengthening FAQ answers to ≥80 words each. "
+                "Do NOT change headings, links, or structure."
+            )
+
+        # Keyword not in first 100 words
+        if any("first 100 words" in i or "first 100" in i for i in issues):
+            fixes.append(
+                f"INTRO — CRITICAL: The focus keyword '{keyword}' must appear within the very "
+                "first 1-2 sentences of the article. Rewrite only the opening paragraph to "
+                "include it naturally — do not alter anything else."
+            )
+
+        # Keyword density too low
+        density = prog.get("keyword_density", 0)
+        if density < 1.0 and keyword:
+            target_count = max(10, int(target_word_count * 0.015))
+            fixes.append(
+                f"KEYWORD DENSITY — CRITICAL: '{keyword}' appears only {density:.1f}% of the time. "
+                f"Increase to at least 1.5% by using the keyword approximately {target_count} times "
+                "throughout the article — in headings, body paragraphs, and FAQ answers."
+            )
+
+        # No images
+        if prog.get("img_count", 0) == 0:
+            fixes.append(
+                "IMAGES — CRITICAL: Add at least 1 relevant image with descriptive alt text. "
+                "Insert an <img> tag with a meaningful alt attribute in the article body."
+            )
+
+        # No internal links
+        if prog.get("internal_link_count", 0) == 0:
+            fixes.append(
+                "INTERNAL LINKS — CRITICAL: Add 2 internal links to related content. "
+                "Use patterns like: "
+                f'<a href="/blogs/news/{keyword.lower().replace(" ", "-")}-guide">related guide</a> '
+                'or <a href="/collections/all">shop our products</a>. '
+                "Place them naturally on navigational phrases in the body."
+            )
+
+        # FAQ missing
+        if not prog.get("has_faq"):
+            fixes.append(
+                f"FAQ — CRITICAL: Add a <section class=\"faq\"> block at the end of the article "
+                f"(before any closing paragraph) containing 4-5 questions and detailed answers "
+                f"about '{keyword}'. Each answer must be at least 60 words."
+            )
+
+        # H2 count
+        if prog.get("h2_count", 0) < 2:
+            fixes.append(
+                "STRUCTURE — CRITICAL: Article has fewer than 2 H2 headings. Add H2 section "
+                "headings to break the content into clear sections. Each section needs a "
+                "descriptive <h2> tag."
+            )
+
+        # Keyword not in SEO title
+        if any("SEO title" in i for i in issues):
+            fixes.append(
+                f"SEO TITLE — CRITICAL: Update the SEO title so it naturally contains "
+                f"'{keyword}'. Keep it 50-60 characters."
+            )
+
+        if not fixes:
+            return article
+
+        instructions = (
+            "SURGICAL FIX — Apply ONLY the following targeted changes. "
+            "Do NOT rewrite unaffected sections, do NOT change style or tone.\n\n"
+            + "\n\n".join(fixes)
+        )
+
+        post = SimpleNamespace(
+            content_html=article.get("content_html", ""),
+            title=article.get("title", ""),
+            seo_title=article.get("seo_title", ""),
+            focus_keyword=keyword,
+            seo_description=article.get("seo_description", ""),
+            tags=article.get("tags", []),
+            image_prompt=article.get("image_prompt", ""),
+        )
+
+        effective_wc = target_word_count if current_words < int(target_word_count * 0.90) else None
+        rewrite_result = await ContentWriter().rewrite(
+            post=post,
+            instructions=instructions,
+            brand_profile=brand_profile,
+            target_word_count=effective_wc,
+        )
+
+        # Persist to DB
+        article_id = article.get("id")
+        if article_id and db is not None:
+            try:
+                from app.models.blog_post import BlogPost
+                db_post = db.query(BlogPost).filter(BlogPost.id == article_id).first()
+                if db_post:
+                    db_post.content_html = rewrite_result.get("content_html", db_post.content_html)
+                    db_post.seo_title    = rewrite_result.get("seo_title",    db_post.seo_title)
+                    db_post.seo_description = rewrite_result.get("seo_description", db_post.seo_description)
+                    db_post.tags         = rewrite_result.get("tags",         db_post.tags)
+                    db.commit()
+            except Exception as exc:
+                logger.warning("CopywriteAgent.surgical_fix: DB update failed: %s", exc)
+
+        return {**article, **rewrite_result}

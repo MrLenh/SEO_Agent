@@ -8,16 +8,14 @@ import logging
 import re
 from typing import Union
 
-from openai import OpenAI
-
-from app.config import settings
+from app.agents.base import get_client, get_model
 
 logger = logging.getLogger(__name__)
 
 
 class AuditAgent:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = get_client()
 
     # ── Public entry point ────────────────────────────────────────────────────
 
@@ -96,28 +94,60 @@ class AuditAgent:
         if kw_lower and seo_title and kw_lower not in seo_title.lower():
             issues.append(f"Focus keyword '{focus_kw}' not found in SEO title")
 
+        # Keyword density (1-3% target)
+        kw_count = text.lower().count(kw_lower) if kw_lower else 0
+        density = (kw_count / word_count * 100) if word_count > 0 and kw_lower else 0
+        if kw_lower and density < 1.0:
+            issues.append(
+                f"Keyword density {density:.1f}% — too low (need 1-3%). "
+                f"Use '{focus_kw}' {max(10, int(word_count * 0.015))} times."
+            )
+        elif kw_lower and density > 3.5:
+            warnings.append(f"Keyword density {density:.1f}% — too high, may look spammy")
+
+        # Images in content
+        img_count = len(re.findall(r'<img[\s>]', html, re.IGNORECASE))
+        if img_count == 0:
+            issues.append("No images in content — add at least 1 image with descriptive alt text")
+
+        # Internal links
+        internal_links = re.findall(r'href=["\'](?!http)(?!mailto)(/[^"\']*)["\']', html, re.IGNORECASE)
+        if not internal_links:
+            issues.append("No internal links — add 2+ links to related content on the site")
+
         # Scoring (out of 100)
         score = 0
         if word_count >= 1500:
-            score += 30
+            score += 25
         elif word_count >= 1200:
-            score += 22
+            score += 18
         elif word_count >= 800:
-            score += 12
+            score += 10
 
         if kw_lower and kw_lower in first_100:
-            score += 20
+            score += 15
 
         if h2_count >= 3:
-            score += 20
+            score += 15
         elif h2_count >= 2:
-            score += 14
+            score += 10
 
         if has_faq:
-            score += 15
+            score += 10
 
         if kw_lower and seo_title and kw_lower in seo_title.lower():
-            score += 15
+            score += 10
+
+        if kw_lower and 1.0 <= density <= 3.5:
+            score += 10
+
+        if img_count >= 1:
+            score += 8
+
+        if len(internal_links) >= 2:
+            score += 7
+        elif len(internal_links) == 1:
+            score += 3
 
         critical_issues = word_count < 800 or h2_count < 2
 
@@ -126,6 +156,9 @@ class AuditAgent:
             "word_count": word_count,
             "h2_count": h2_count,
             "has_faq": has_faq,
+            "keyword_density": round(density, 2),
+            "img_count": img_count,
+            "internal_link_count": len(internal_links),
             "issues": issues,
             "warnings": warnings,
             "critical_issues": critical_issues,
@@ -141,7 +174,7 @@ class AuditAgent:
         target_keywords: list,
         prog: dict,
     ) -> dict:
-        model = getattr(settings, "OPENAI_MODEL", "") or "gpt-4o"
+        model = get_model("audit")
 
         article_preview = html[:3000]
 
@@ -157,6 +190,9 @@ class AuditAgent:
             f"Word count: {prog.get('word_count', 'N/A')}, "
             f"H2 count: {prog.get('h2_count', 'N/A')}, "
             f"Has FAQ: {prog.get('has_faq', False)}, "
+            f"Keyword density: {prog.get('keyword_density', 0):.1f}%, "
+            f"Images: {prog.get('img_count', 0)}, "
+            f"Internal links: {prog.get('internal_link_count', 0)}, "
             f"Programmatic score: {prog.get('score', 0)}/100"
         )
 

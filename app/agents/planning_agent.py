@@ -7,16 +7,14 @@ import logging
 from datetime import date
 from typing import Optional
 
-from openai import OpenAI
-
-from app.config import settings
+from app.agents.base import get_client, get_model
 
 logger = logging.getLogger(__name__)
 
 
 class PlanningAgent:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = get_client()
 
     # ── Main analysis ─────────────────────────────────────────────────────────
 
@@ -194,11 +192,7 @@ class PlanningAgent:
         shop_domain: str,
     ) -> dict:
         """Use AI to generate strategic SEO recommendations."""
-        model = (
-            getattr(settings, "OPENAI_MODEL_FAST", "") or
-            settings.OPENAI_MODEL or
-            "gpt-4o"
-        )
+        model = get_model("planning")
 
         has_tracking = tracking.get("total_tracked", 0) > 0
         has_gsc = bool(gsc)

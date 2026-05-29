@@ -6,17 +6,16 @@ import json
 import re
 from datetime import datetime
 
-from openai import OpenAI
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.agents.base import get_client, get_model
 from app.models.keyword import TopicCluster, TopicClusterStatus
 from app.services.keyword_analyzer import KeywordAnalyzer
 
 
 class TopicPlanner:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = get_client()
         self.analyzer = KeywordAnalyzer()
 
     def _build_prompt(
@@ -89,7 +88,7 @@ Generate 5-7 supporting articles targeting the PAA questions and related searche
 
         # 3. OpenAI generates cluster plan (JSON mode for reliable parsing)
         message = self.client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
+            model=get_model("planning"),
             max_tokens=2500,
             response_format={"type": "json_object"},
             messages=[
