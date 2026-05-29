@@ -1,13 +1,13 @@
 import math
-from openai import OpenAI
-from app.config import settings
+from app.agents.base import get_client
 
 _EMBED_MODEL = "text-embedding-3-small"
 
 
 class EmbeddingService:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        # Embeddings API is OpenAI-only — OpenRouter does not support it
+        self.client = get_client(force_openai=True)
 
     def embed(self, text: str) -> list[float]:
         text = text.replace("\n", " ")[:8000]

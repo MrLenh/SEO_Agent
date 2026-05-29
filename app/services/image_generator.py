@@ -8,9 +8,7 @@ import secrets
 import time
 from pathlib import Path
 
-from openai import OpenAI
-
-from app.config import settings
+from app.agents.base import get_client
 
 
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "static" / "uploads"
@@ -20,7 +18,8 @@ class ImageGenerator:
     VALID_SIZES = {"1024x1024", "1536x1024", "1024x1536", "auto"}
 
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        # Image generation (gpt-image-1) is OpenAI-only
+        self.client = get_client(force_openai=True)
         UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
     def generate(

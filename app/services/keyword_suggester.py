@@ -60,8 +60,8 @@ def generate_suggestions(posts: list, shop_domain: str, limit: int = 40) -> dict
     Returns keyword suggestions categorised by type.
     posts: list of BlogPost ORM objects for the store.
     """
-    from openai import OpenAI
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    from app.agents.base import get_client, get_model
+    client = get_client()
 
     themes_text = _extract_store_themes(posts)
     existing_kws = list({p.focus_keyword for p in posts if p.focus_keyword})[:20]
@@ -103,7 +103,7 @@ Rules:
 - Return only valid JSON."""
 
     resp = client.chat.completions.create(
-        model=settings.OPENAI_MODEL,
+        model=get_model("research"),
         max_tokens=2000,
         response_format={"type": "json_object"},
         messages=[{"role": "user", "content": prompt}],

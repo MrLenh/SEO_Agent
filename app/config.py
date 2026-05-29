@@ -20,11 +20,15 @@ class Settings(BaseSettings):
     WC_CONSUMER_KEY: str = ""
     WC_CONSUMER_SECRET: str = ""
 
-    # AI
+    # AI — OpenAI (required for embeddings + image generation)
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_MODEL_FAST: str = ""   # e.g. gpt-4o-mini — for Research & Planning agents
     OPENAI_MODEL_SMART: str = ""  # e.g. gpt-4o — for Copywrite & Learning agents
+
+    # OpenRouter (optional — replaces OpenAI for text generation, cheaper + more models)
+    # Get your key at https://openrouter.ai/keys
+    OPENROUTER_API_KEY: str = ""
 
     # SEO
     SERPER_API_KEY: str = ""

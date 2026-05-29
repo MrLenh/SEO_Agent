@@ -8,10 +8,9 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from openai import OpenAI
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.agents.base import get_client, get_model, build_messages
 from app.models.blog_post import BlogPost, Platform, PostStatus
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 class ContentWriter:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = get_client()
 
     # ── Product helpers ───────────────────────────────────────────────────────
 
@@ -394,16 +393,14 @@ Respond in this exact format:
             platform_guideline=platform_guideline,
         )
 
-        messages = [m for m in [
-            {"role": "system", "content": system} if system.strip() else None,
-            {"role": "user",   "content": user}   if user.strip()   else None,
-        ] if m]
+        model = get_model("copywrite")
+        messages = build_messages(system, user, model)
 
         # Allow ~5 tokens per output word (HTML overhead) with a generous buffer
         max_tokens = min(16000, max(4096, int(word_count * 5)))
 
         message = self.client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
+            model=model,
             max_tokens=max_tokens,
             messages=messages,
         )
@@ -483,34 +480,28 @@ Respond in this exact format:
         bp = brand_profile or {}
         tone_hint = f"\nMaintain tone: {bp['tone_of_voice']}" if bp.get("tone_of_voice") else ""
 
+        model = get_model("copywrite")
+        expand_system = (
+            f"You are an expert SEO content editor.{tone_hint}\n"
+            "Expand articles to hit a precise word count — no padding."
+        )
+        expand_user = (
+            f'This article about "{focus_keyword}" has {current_words} words '
+            f"but must reach {target_words} words.\n\n"
+            f"Add ≈{deficit} words by:\n"
+            f"1. Expanding H2 sections under 150 words with depth, examples, or data\n"
+            f"2. Lengthening FAQ answers that are under 80 words each\n"
+            f"3. Adding one new relevant H2 section if body is still short\n\n"
+            f"Rules:\n"
+            f"- Return the COMPLETE expanded article HTML (all existing + new content)\n"
+            f"- Keep all existing links, headings, and structure intact\n"
+            f"- No filler: every added sentence must convey real information\n\n"
+            f"Current article:\n{html}"
+        )
         resp = self.client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
+            model=model,
             max_tokens=min(16000, int(target_words * 5)),
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        f"You are an expert SEO content editor.{tone_hint}\n"
-                        "Expand articles to hit a precise word count — no padding."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f'This article about "{focus_keyword}" has {current_words} words '
-                        f"but must reach {target_words} words.\n\n"
-                        f"Add ≈{deficit} words by:\n"
-                        f"1. Expanding H2 sections under 150 words with depth, examples, or data\n"
-                        f"2. Lengthening FAQ answers that are under 80 words each\n"
-                        f"3. Adding one new relevant H2 section if body is still short\n\n"
-                        f"Rules:\n"
-                        f"- Return the COMPLETE expanded article HTML (all existing + new content)\n"
-                        f"- Keep all existing links, headings, and structure intact\n"
-                        f"- No filler: every added sentence must convey real information\n\n"
-                        f"Current article:\n{html}"
-                    ),
-                },
-            ],
+            messages=build_messages(expand_system, expand_user, model),
         )
         expanded = resp.choices[0].message.content.strip()
         # Strip accidental <article> wrapper if the model added one
@@ -551,14 +542,11 @@ Rules:
 Return ONLY a JSON array of {count} strings, no commentary. Example:
 ["Best Wireless Earbuds for Running in 2025", "How to Pick Running Earbuds That Don't Fall Out"]"""
 
-        sg_messages = [m for m in [
-            {"role": "system", "content": system} if system.strip() else None,
-            {"role": "user",   "content": user}   if user.strip()   else None,
-        ] if m]
+        model = get_model("copywrite")
         message = self.client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
+            model=model,
             max_tokens=600,
-            messages=sg_messages,
+            messages=build_messages(system, user, model),
         )
         raw = (message.choices[0].message.content or "").strip()
         match = re.search(r"\[.*\]", raw, re.DOTALL)
@@ -665,17 +653,14 @@ Respond in this exact format:
 {{"seo_title": "60-char SEO title", "meta_description": "155-char description with keyword", "tags": ["tag1","tag2","tag3"], "image_prompt": "DALL-E prompt for a professional blog banner"}}
 </meta>"""
 
-        rw_messages = [m for m in [
-            {"role": "system", "content": system} if system.strip() else None,
-            {"role": "user",   "content": user}   if user.strip()   else None,
-        ] if m]
+        model = get_model("copywrite")
         # Need tokens for target size (not just original) when expanding
         effective_words = max(orig_words, target_word_count or 0)
         rw_max_tokens   = min(16000, max(4096, int(effective_words * 5)))
         message = self.client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
+            model=model,
             max_tokens=rw_max_tokens,
-            messages=rw_messages,
+            messages=build_messages(system, user, model),
         )
         raw = message.choices[0].message.content
         article_match = re.search(r"<article>(.*?)</article>", raw, re.DOTALL)

@@ -8,16 +8,14 @@ import logging
 import re
 from typing import Union
 
-from openai import OpenAI
-
-from app.config import settings
+from app.agents.base import get_client, get_model
 
 logger = logging.getLogger(__name__)
 
 
 class AuditAgent:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = get_client()
 
     # ── Public entry point ────────────────────────────────────────────────────
 
@@ -141,7 +139,7 @@ class AuditAgent:
         target_keywords: list,
         prog: dict,
     ) -> dict:
-        model = getattr(settings, "OPENAI_MODEL", "") or "gpt-4o"
+        model = get_model("audit")
 
         article_preview = html[:3000]
 
